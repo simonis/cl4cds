@@ -1,3 +1,4 @@
 repository: simonis/cl4cds
 theme: jekyll-theme-cayman
-
+plugins:
+  - jemoji
