@@ -1,7 +1,7 @@
 
 = Class Data Sharing
 
-:source-highlighter: pgments
+:source-highlighter: pygments
 
 Class Data Sharing (CDS) is a feature to improve startup performance and reduce the memory footprint of the HotSpot JVM by storing the preprocessed metadata of system classes to disk and sharing them between virtual machines running on the same host. It was introduced as early as 2004 with the first release of https://docs.oracle.com/javase/1.5.0/docs/guide/vm/class-data-sharing.html[Oracle's Java 5 release] and later became available in the first version of OpenJDK (i.e. http://hg.openjdk.java.net/jdk6/jdk6[jdk6]). During the last years, this feature has been constantly extended and improved. Oracle JDK 9 introduced https://docs.oracle.com/javase/9/tools/java.htm#JSWOR-GUID-31503FCE-93D0-4175-9B4F-F6A738B2F4C4[AppCDS] as a commercial feature only, which additionally allows the caching and sharing of application classes, strings and symbols. This commercial feature will be open sourced and made freely available in OpenJDK 10 by http://openjdk.java.net/jeps/310[JEP 310: Application Class-Data Sharing].
 
@@ -207,17 +207,16 @@ public class HelloCDS2 {
 
 Now we can use the `pmap` utility to compare the resident memory 
 
-<!--
+////
 http://www.software-architect.net/blog/article/date/2015/07/03/cheat-sheet-understanding-the-pmap1-output.html
 http://www.software-architect.net/fileadmin/user_upload/blog/pmap.png
 
 https://unix.stackexchange.com/questions/33381/getting-information-about-a-process-memory-usage-from-proc-pid-smaps
 
 https://www.kernel.org/doc/Documentation/filesystems/proc.txt
--->
+////
 
-<!--
-
+////
 $ pmap -XX 24843 | head -2
 24843:   /share/output-jdk9-dev-opt/images/jdk/bin/java -Xshare:off -XX:+UnlockDiagnosticVMOptions -XX:SharedArchiveFile=/tmp/HelloCDS.jsa -cp bin/ io.simonis.HelloCDS2
          Address Perm   Offset Device   Inode    Size   Rss   Pss Shared_Clean Shared_Dirty Private_Clean Private_Dirty Referenced Anonymous AnonHugePages Swap KernelPageSize MMUPageSize Locked
@@ -263,8 +262,7 @@ $ pmap -XX 24728 | grep HelloCDS.jsa
 
  /share/output-jdk9-dev-opt/images/jdk/bin/jcmd `pgrep -f HelloCDS` VM.native_memory
 pmap -XX `pgrep -f HelloCDS` | sed -n -e '2p;$p'
-
--->
+////
 
 == CDS summary
 
