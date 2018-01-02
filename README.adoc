@@ -268,15 +268,19 @@ pmap -XX `pgrep -f HelloCDS` | sed -n -e '2p;$p'
 
 Finally, it should be mentioned that the each of the various `-Xshare` options there exists a corresponding extended `-XX:` option as indicated in the following table:
 
-Short Form | Long Form
----------- | ---------
-`-Xshare:dump` | `-XX:+DumpSharedSpaces` (implies `-Xint`)
-`-Xshare:on` | `-XX:+UseSharedSpaces` `-XX:+RequireSharedSpaces`
-`-Xshare:auto` | `-XX:+UseSharedSpaces` `-XX:-RequireSharedSpaces`
-`-Xshare:off` | `-XX:-UseSharedSpaces` `-XX:-RequireSharedSpaces`
+|===
+| Short Form | Long Form
 
-<!--
+| `-Xshare:dump` | `-XX:+DumpSharedSpaces` (implies `-Xint`)
 
+| `-Xshare:on` | `-XX:+UseSharedSpaces` `-XX:+RequireSharedSpaces`
+
+| `-Xshare:auto` | `-XX:+UseSharedSpaces` `-XX:-RequireSharedSpaces`
+
+| `-Xshare:off` | `-XX:-UseSharedSpaces` `-XX:-RequireSharedSpaces`
+|===
+
+////
 /* Shared spaces */                                                       \
                                                                             \
   product(bool, UseSharedSpaces, true,                                      \
@@ -353,9 +357,9 @@ ConstantPool*p ==>[ _vptr    ] =======> [ vtable slot 0 ]
 
 RFR[S] 8005165 Platform-independent C++ vtables for CDS
 http://mail.openjdk.java.net/pipermail/hotspot-dev/2017-March/thread.html#26063
+////
 
--->
-
+////
 <!--  LocalWords:  CDS startup HotSpot JVM preprocessed metadata jdk
  -->
 <!--  LocalWords:  OpenJDK SDK adaptingclassloaders AOT JVMs OpenJ VM
@@ -376,3 +380,4 @@ http://mail.openjdk.java.net/pipermail/hotspot-dev/2017-March/thread.html#26063
  -->
 <!--  LocalWords:  UseSharedSpaces RequireSharedSpaces
  -->
+////
