@@ -285,6 +285,10 @@ Finally, it should be mentioned that the each of the various `-Xshare` options t
 | `-Xshare:off` | `-XX:-UseSharedSpaces` `-XX:-RequireSharedSpaces`
 |===
 
+==== Colophon
+
+Rendered with AsciiDoctor version {asciidoctor-version}
+
 ////
 /* Shared spaces */                                                       \
                                                                             \
