@@ -1,11 +1,13 @@
-= TL;DR
+= cl4cds
 :toc:
 :toc-placement!:
 :source-highlighter: pygments
 
+== TL;DR
+
 toc::[]
 
-= Class Data Sharing
+== Class Data Sharing
 
 Class Data Sharing (CDS) is a feature to improve startup performance and reduce the memory footprint of the HotSpot JVM by storing the preprocessed metadata of system classes to disk and sharing them between virtual machines running on the same host. It was introduced as early as 2004 with the first release of https://docs.oracle.com/javase/1.5.0/docs/guide/vm/class-data-sharing.html[Oracle's Java 5 release] and later became available in the first version of OpenJDK (i.e. http://hg.openjdk.java.net/jdk6/jdk6[jdk6]). During the last years, this feature has been constantly extended and improved. Oracle JDK 9 introduced https://docs.oracle.com/javase/9/tools/java.htm#JSWOR-GUID-31503FCE-93D0-4175-9B4F-F6A738B2F4C4[AppCDS] as a commercial feature only, which additionally allows the caching and sharing of application classes, strings and symbols. This commercial feature will be open sourced and made freely available in OpenJDK 10 by http://openjdk.java.net/jeps/310[JEP 310: Application Class-Data Sharing].
 
@@ -13,7 +15,7 @@ Starting with their Java SDK 6.0, IBM also started to support https://www.ibm.co
 
 This article will only cover the HotSpot CDS functionality and implementation. If you're interested in the J9/OpenJ9 implementation you may have a look at the https://www.ibm.com/support/knowledgecenter/en/SSYKE2_9.0.0/com.ibm.java.multiplatform.90.doc/user/classdatasharing.html[latest documentation], watch the presentation about "OpenJ9: Under the hood of the next open source JVM" from https://www.youtube.com/watch?v=3VporpPlDds[Geekon 2017 / Krakow] or https://www.youtube.com/watch?v=96XoG6xcnys[Devoxx 2017 / Poland] or simply https://adoptopenjdk.net/releases.html?variant=openjdk9-openj9[download OpenJ9] and run `java -Xshareclasses:help` :wink:
 
-= Using CDS
+== Using CDS
 
 In Oracle J2SE 5.0 the usage of CDS was quite restricted - the feature was only available in the Client VM when running with the Serial GC. Meanwhile, https://docs.oracle.com/javase/9/vm/class-data-sharing.htm#JSJVM-GUID-0260F857-A70E-4399-A1DF-A5766BE33285[Oracle/OpenJDK 9 CDS] also supports the G1, Serial, Parallel, and ParallelOld GCs with the Server VM. The following examples are all based on OpenJDK 9.
 
@@ -164,7 +166,7 @@ Hello CDS
 
 This time all the classes except our application class `io.simonis.HelloCDS` have been loaded from the shared archive! 
 
-== CDS performance benefits
+=== CDS performance benefits
 
 So let's see if CDS makes any difference if it comes to start-up performance by using the `time` utility to measure the elapsed wall clock time (the output below actually shows the avarage of five runs in a row):
 
@@ -192,7 +194,7 @@ $ time -f "%e sec\n" java -Xshare:on -XX:+UnlockDiagnosticVMOptions -XX:SharedAr
 
 Notice that the overall execution time has slightly increased because of the additional logging but the time until our `HelloCDS` class gets loaded is about 13% faster with CDS compared to the default run without CDS.
 
-== CDS memory savings
+=== CDS memory savings
 
 In order to gather some memory consumption statistics, we slightly extend our example program to read some data from the standard input stream:
 
@@ -267,7 +269,7 @@ $ pmap -XX 24728 | grep HelloCDS.jsa
 pmap -XX `pgrep -f HelloCDS` | sed -n -e '2p;$p'
 ////
 
-== CDS summary
+=== CDS summary
 
 Finally, it should be mentioned that the each of the various `-Xshare` options there exists a corresponding extended `-XX:` option as indicated in the following table:
 
