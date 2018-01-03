@@ -268,6 +268,22 @@ public class cl4cds {
   }
 
   private static void help(int status) {
+    System.out.println();
+    System.out.println("io.simonis.cl4cds [<class-trace-file> [<class-list-file>]]");
+    System.out.println();
+    System.out.println("  <class-trace-file>: class trace output obtained by running -Xlog:class+load");
+    System.out.println("                      if not specified read from <stdin>");
+    System.out.println("  <class-list-file> : class list which can be passed to -XX:SharedClassListFile");
+    System.out.println("                      if not specified written to <stdout>");
+    System.out.println();
+    System.out.println("  The following properties can be used to configure cl4cds:");
+    System.out.println("    -Dio.simonis.cl4cds.debug=true :");
+    System.out.println("       Print additional tracig to <stderr> (defaults to 'false')");
+    System.out.println("    -Dio.simonis.cl4cds.dumpFromClassFile=true :");
+    System.out.println("       Include classes into the output which are loaded from plain classfiles.");
+    System.out.println("       This is currently not supported by OpenJDK 10 which can only dump");
+    System.out.println("       classes from .jar files but may change eventually (defaults to 'false')");
+    System.out.println();
     System.exit(status);
   }
 
