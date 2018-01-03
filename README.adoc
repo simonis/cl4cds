@@ -3,7 +3,36 @@
 :toc-placement!:
 :source-highlighter: pygments
 
+`cl4cds` is a little tool which helps exploring the new Application Class Data Sharing (AppCDS) feature in OpenJDK 10. AppCDS allows sharing of application classes even if they get loaded by a custom class loaders, but unfortunately there's currently no default tooling available to make this feature accessible to end users. That's where `cl4cds` (which is an acronym for "class list for class data sharing") kicks in. It converts a class list obtained from running your application with `Xlog:class+load` to a format which can be passed to the VM as a parameter of the `-XX:SharedClassListFile=` option. This article documents the `cl4cds` tool but at the same time also describes the implementation and the benefits of the ovarall CDS/AppCDS features.
+
 == TL;DR
+
+If you're only interested in the `cl4cds` utility, you can use it as follows (tested with http://openjdk.java.net/projects/jdk/10/[OpenJDK 10] and https://tomcat.apache.org/download-90.cgi[Tomcat 9]):
+
+[source, console]
+----
+$ export JAVA_HOME=JAVA_10_HOME # <1>
+$ export CATALINA_OPTS=-Xlog:class+load:file=/tmp/tomcat.classtrace <2>
+$ CATALINA_HOME/bin/catalina.sh start <3>
+$ CATALINA_HOME/bin/catalina.sh stop <4>
+$ JAVA_10_HOME/bin/java io.simonis.cl4cds /tmp/tomcat.classtrace /tmp/tomcat.cls
+$ export CATALINA_OPTS="-Xshare:dump -XX:+UseAppCDS -XX:SharedClassListFile=/tmp/tomcat.cls -XX:+UnlockDiagnosticVMOptions -XX:SharedArchiveFile=/tmp/tomcat.jsa" <5>
+$ CATALINA_HOME/bin/catalina.sh start <6>
+$ export CATALINA_OPTS="-Xshare:on -XX:+UseAppCDS -XX:+UnlockDiagnosticVMOptions -XX:SharedArchiveFile=/tmp/tomcat.jsa" <7>
+$ CATALINA_HOME/bin/catalina.sh start <8>
+----
+<1> AppCDS only works with OpenJDK 10 and higher
+<2> Trace all the classes which get loaded into the file `/tmp/tomcat.classtrace`
+<3> Start Tomcat and run your application
+<4> Stop Tomcat
+<5> Set the options for creating a shared class archive in `/tmp/tomcat.jsa` (`-XX:SharedArchiveFile` is a diagnostic option so we have to enable it first by using `-XX:+UnlockDiagnosticVMOptions`)
+<6> Restart Tomcat to dump the shared class archive
+<7> Set the options for using the shared class archive from `/tmp/tomcat.jsa`
+<8> From now on, Tomcat will load availabl classes (both, system and application ones) from the shared archive if available.
+
+If you're inerested in the current limitations of CDS/AppCDS, their implementation details and performance and memory consumption gains achievable by CDS/AppCDS please read on or visit my talk about https://fosdem.org/2018/schedule/event/class_data_sharing[Class Data Sharing at FOSDEM 2018].
+
+WARNING: the following is work in progress!
 
 toc::[]
 
@@ -11,7 +40,7 @@ toc::[]
 
 Class Data Sharing (CDS) is a feature to improve startup performance and reduce the memory footprint of the HotSpot JVM by storing the preprocessed metadata of system classes to disk and sharing them between virtual machines running on the same host. It was introduced as early as 2004 with the first release of https://docs.oracle.com/javase/1.5.0/docs/guide/vm/class-data-sharing.html[Oracle's Java 5 release] and later became available in the first version of OpenJDK (i.e. http://hg.openjdk.java.net/jdk6/jdk6[jdk6]). During the last years, this feature has been constantly extended and improved. Oracle JDK 9 introduced https://docs.oracle.com/javase/9/tools/java.htm#JSWOR-GUID-31503FCE-93D0-4175-9B4F-F6A738B2F4C4[AppCDS] as a commercial feature only, which additionally allows the caching and sharing of application classes, strings and symbols. This commercial feature will be open sourced and made freely available in OpenJDK 10 by http://openjdk.java.net/jeps/310[JEP 310: Application Class-Data Sharing].
 
-Starting with their Java SDK 6.0, IBM also started to support https://www.ibm.com/support/knowledgecenter/en/SSYKE2_6.0.0/com.ibm.java.doc.user.lnx.60/user/shc_overview.html[Class Data Sharing]. They not only supported system class but also classes loaded by the application class loader (a.k.a. system class loader), classes loaded by https://www.ibm.com/support/knowledgecenter/SSYKE2_6.0.0/com.ibm.java.doc.user.lnx.60/user/adaptingclassloaders.html?view=kc#adaptingclassloaders[custom class loaders] and even ahead-of-time (AOT) compiled code (which was not shared between JVMs). While IBM J9's CDS addresses similar problems like the HotSpot class data sharing feature in Oracle/OpenJDK, it is technically a completely independent implementation. Although it is much more mature and elaborate compared to the HotSpot implementation, J9's CDS hasn't attracted that much attention simply because Oracle/OpenJDK has been the predominant JVM in the past decade. But that might change with the open sourcing of the IBM J9 JVM within the https://www.eclipse.org/openj9/[Eclipse OpenJ9] project. 
+Starting with their Java SDK 6.0, IBM also started to support https://www.ibm.com/support/knowledgecenter/en/SSYKE2_6.0.0/com.ibm.java.doc.user.lnx.60/user/shc_overview.html[Class Data Sharing]. They not only supported system class but also classes loaded by the application class loader (a.k.a. system class loader), classes loaded by https://www.ibm.com/support/knowledgecenter/SSYKE2_6.0.0/com.ibm.java.doc.user.lnx.60/user/adaptingclassloaders.html?view=kc#adaptingclassloaders[custom class loaders] and even ahead-of-time (AOT) compiled code (which was not shared between JVMs). While IBM J9's CDS addresses similar problems like the HotSpot class data sharing feature in Oracle/OpenJDK, it is technically a completely independent implementation. Although it is much more mature and elaborate compared to the HotSpot implementation, J9's CDS hasn't attracted that much attention simply because Oracle/OpenJDK has been the predominant JVM in the past decade. But that might change with the open sourcing of the IBM J9 JVM within the https://www.eclipse.org/openj9/[Eclipse OpenJ9] project.
 
 This article will only cover the HotSpot CDS functionality and implementation. If you're interested in the J9/OpenJ9 implementation you may have a look at the https://www.ibm.com/support/knowledgecenter/en/SSYKE2_9.0.0/com.ibm.java.multiplatform.90.doc/user/classdatasharing.html[latest documentation], watch the presentation about "OpenJ9: Under the hood of the next open source JVM" from https://www.youtube.com/watch?v=3VporpPlDds[Geekon 2017 / Krakow] or https://www.youtube.com/watch?v=96XoG6xcnys[Devoxx 2017 / Poland] or simply https://adoptopenjdk.net/releases.html?variant=openjdk9-openj9[download OpenJ9] and run `java -Xshareclasses:help` :wink:
 
@@ -33,8 +62,8 @@ Number of classes 1197
     instance classes   =  1183
     obj array classes  =     6
     type array classes =     8
-Updating ConstMethods ... done. 
-Removing unshareable information ... done. 
+Updating ConstMethods ... done.
+Removing unshareable information ... done.
 ro space:   5332520 [ 30.5% of total] out of  10485760 bytes [ 50.9% used] at 0x0000000800000000
 rw space:   5630560 [ 32.2% of total] out of  10485760 bytes [ 53.7% used] at 0x0000000800a00000
 md space:     98976 [  0.6% of total] out of   4194304 bytes [  2.4% used] at 0x0000000801400000
@@ -85,7 +114,7 @@ public class HelloCDS {
 [source, console]
 ----
 $ rm -f <java_home>/lib/server/classes.jsa
-$ java -Xshare:on HelloCDS 
+$ java -Xshare:on HelloCDS
 An error has occurred while processing the shared archive file.
 Specified shared archive not found.
 Error occurred during initialization of VM
@@ -96,7 +125,7 @@ We could instead use `-Xshare:auto` which behaves like `-Xshare:on` if the share
 
 [source, console]
 ----
-$ java -Xshare:on HelloCDS 
+$ java -Xshare:on HelloCDS
 Hello CDS
 ----
 
@@ -104,7 +133,7 @@ Here the class loading log comes in quite handy, because it not only reports whi
 
 [source, console]
 ----
-$ java -Xshare:on -Xlog:class+load io.simonis.HelloCDS 
+$ java -Xshare:on -Xlog:class+load io.simonis.HelloCDS
 [0.011s][info][class,load] opened: /share/output-jdk9-dev-opt/images/jdk/lib/modules
 [0.024s][info][class,load] java.lang.Object source: shared objects file
 [0.024s][info][class,load] java.io.Serializable source: shared objects file
@@ -143,8 +172,8 @@ Number of classes 522
     instance classes   =   508
     obj array classes  =     6
     type array classes =     8
-Updating ConstMethods ... done. 
-Removing unshareable information ... done. 
+Updating ConstMethods ... done.
+Removing unshareable information ... done.
 ro space:   2498200 [ 31.5% of total] out of  10485760 bytes [ 23.8% used] at 0x0000000800000000
 rw space:   2500208 [ 31.6% of total] out of  10485760 bytes [ 23.8% used] at 0x0000000800a00000
 md space:     68760 [  0.9% of total] out of   4194304 bytes [  1.6% used] at 0x0000000801400000
@@ -164,7 +193,7 @@ $ /share/output-jdk9-dev-opt/images/jdk/bin/java -Xshare:on -Xlog:class+load -XX
 Hello CDS
 ----
 
-This time all the classes except our application class `io.simonis.HelloCDS` have been loaded from the shared archive! 
+This time all the classes except our application class `io.simonis.HelloCDS` have been loaded from the shared archive!
 
 === CDS performance benefits
 
@@ -172,10 +201,10 @@ So let's see if CDS makes any difference if it comes to start-up performance by 
 
 [source, console]
 ----
-$ time -f "%e sec\n" java -Xshare:off -XX:+UnlockDiagnosticVMOptions -XX:SharedArchiveFile=/tmp/HelloCDS.jsa io.simonis.HelloCDS 
+$ time -f "%e sec\n" java -Xshare:off -XX:+UnlockDiagnosticVMOptions -XX:SharedArchiveFile=/tmp/HelloCDS.jsa io.simonis.HelloCDS
 Hello CDS
 0.162 sec
-$ time -f "%e sec\n" java -Xshare:on -XX:+UnlockDiagnosticVMOptions -XX:SharedArchiveFile=/tmp/HelloCDS.jsa io.simonis.HelloCDS 
+$ time -f "%e sec\n" java -Xshare:on -XX:+UnlockDiagnosticVMOptions -XX:SharedArchiveFile=/tmp/HelloCDS.jsa io.simonis.HelloCDS
 Hello CDS
 0.148 sec
 ----
@@ -210,7 +239,7 @@ public class HelloCDS2 {
 }
 ----
 
-Now we can use the `pmap` utility to compare the resident memory 
+Now we can use the `pmap` utility to compare the resident memory
 
 ////
 http://www.software-architect.net/blog/article/date/2015/07/03/cheat-sheet-understanding-the-pmap1-output.html
@@ -226,11 +255,11 @@ $ pmap -XX 24843 | head -2
 24843:   /share/output-jdk9-dev-opt/images/jdk/bin/java -Xshare:off -XX:+UnlockDiagnosticVMOptions -XX:SharedArchiveFile=/tmp/HelloCDS.jsa -cp bin/ io.simonis.HelloCDS2
          Address Perm   Offset Device   Inode    Size   Rss   Pss Shared_Clean Shared_Dirty Private_Clean Private_Dirty Referenced Anonymous AnonHugePages Swap KernelPageSize MMUPageSize Locked
 $ pmap -XX 24843 | tail -1
-                                              5226548 33284 30347         2956            0         14340         15988      33284     15984          6144    0            860         860      0 KB 
+                                              5226548 33284 30347         2956            0         14340         15988      33284     15984          6144    0            860         860      0 KB
 $ pmap -XX 24843 | tail -1
-                                              5226548 33284 23203        17244            0            52         15988      33284     15984          6144    0            860         860      0 KB 
+                                              5226548 33284 23203        17244            0            52         15988      33284     15984          6144    0            860         860      0 KB
 $ pmap -XX 24843 | tail -1
-                                              5226548 33284 20817        17244            0            56         15984      33284     15984          6144    0            860         860      0 KB 
+                                              5226548 33284 20817        17244            0            56         15984      33284     15984          6144    0            860         860      0 KB
 $ pmap -XX 24843 | grep libjvm
     7f509fa61000 r-xp 00000000  08:01 2148980   15232 12372  4139        12348            0            24             0      12372         0             0    0              4           4      0       rd ex mr mw me sd  libjvm.so
     7f50a0941000 ---p 00ee0000  08:01 2148980    2048     0     0            0            0             0             0          0         0             0    0              4           4      0             mr mw me sd  libjvm.so
@@ -243,11 +272,11 @@ $ pmap -XX 24728 | head -2
 24728:   /share/output-jdk9-dev-opt/images/jdk/bin/java -Xshare:on -XX:+UnlockDiagnosticVMOptions -XX:SharedArchiveFile=/tmp/HelloCDS.jsa -cp bin/ io.simonis.HelloCDS2
          Address Perm   Offset Device   Inode    Size   Rss   Pss Shared_Clean Shared_Dirty Private_Clean Private_Dirty Referenced Anonymous AnonHugePages Swap KernelPageSize MMUPageSize Locked
 $ pmap -XX 24728 | tail -1
-                                              5275940 39540 36581         2980            0         18908         17652      39540     17648          8192    0            920         920      0 KB 
+                                              5275940 39540 36581         2980            0         18908         17652      39540     17648          8192    0            920         920      0 KB
 $ pmap -XX 24728 | tail -1
-                                              5275940 39540 27141        21860            0            28         17652      39540     17648          8192    0            920         920      0 KB 
+                                              5275940 39540 27141        21860            0            28         17652      39540     17648          8192    0            920         920      0 KB
 $ pmap -XX 24728 | tail -1
-                                              5275940 39540 24049        21860            0            32         17648      39524     17648          8192    0            920         920      0 KB 
+                                              5275940 39540 24049        21860            0            32         17648      39524     17648          8192    0            920         920      0 KB
 $ pmap -XX 24728 | grep libjvm
     7f3cbaa72000 r-xp 00000000  08:01 2148980   15232 12432  4179        12432            0             0             0      12432         0             0    0              4           4      0       rd ex mr mw me sd  libjvm.so
     7f3cbb952000 ---p 00ee0000  08:01 2148980    2048     0     0            0            0             0             0          0         0             0    0              4           4      0             mr mw me sd  libjvm.so
@@ -263,7 +292,7 @@ $ pmap -XX 24728 | grep HelloCDS.jsa
        80181e000 r--p 004e2000  08:01   64453    2748  2748   915         2748            0             0             0       2748         0             0    0              4           4      0          rd mr mw me sd  HelloCDS.jsa
 
 
--XX:InitialBootClassLoaderMetaspaceSize=30K  vs. -XX:InitialBootassLoaderMetaspaceSize=4M 
+-XX:InitialBootClassLoaderMetaspaceSize=30K  vs. -XX:InitialBootassLoaderMetaspaceSize=4M
 
  /share/output-jdk9-dev-opt/images/jdk/bin/jcmd `pgrep -f HelloCDS` VM.native_memory
 pmap -XX `pgrep -f HelloCDS` | sed -n -e '2p;$p'
@@ -285,6 +314,7 @@ Finally, it should be mentioned that the each of the various `-Xshare` options t
 | `-Xshare:off` | `-XX:-UseSharedSpaces` `-XX:-RequireSharedSpaces`
 |===
 
+[colophon]
 ==== Colophon
 
 Rendered with AsciiDoctor version {asciidoctor-version}
