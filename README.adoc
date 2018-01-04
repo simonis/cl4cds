@@ -35,9 +35,28 @@ $ CATALINA_HOME/bin/catalina.sh start <8>
 <5> Set the options for creating a shared class archive in `/tmp/tomcat.jsa` (`-XX:SharedArchiveFile` is a diagnostic option so we have to enable it first by using `-XX:+UnlockDiagnosticVMOptions`)
 <6> Restart Tomcat to dump the shared class archive
 <7> Set the options for using the shared class archive from `/tmp/tomcat.jsa`
-<8> From now on, Tomcat will load availabl classes (both, system and application ones) from the shared archive if available.
+<8> From now on, Tomcat will load available classes (both, system and application ones) from the shared archive if available.
 
-If you're inerested in the current limitations of CDS/AppCDS, their implementation details and performance and memory consumption gains achievable by CDS/AppCDS please read on or visit my talk about https://fosdem.org/2018/schedule/event/class_data_sharing[Class Data Sharing at FOSDEM 2018].
+The current `cl4cds` command line options are as follows:
+
+----
+io.simonis.cl4cds [<class-trace-file> [<class-list-file>]]
+
+  <class-trace-file>: class trace output obtained by running -Xlog:class+load
+                      if not specified read from <stdin>
+  <class-list-file> : class list which can be passed to -XX:SharedClassListFile
+                      if not specified written to <stdout>
+
+  The following properties can be used to configure cl4cds:
+    -Dio.simonis.cl4cds.debug=true :
+       Print additional tracig to <stderr> (defaults to 'false')
+    -Dio.simonis.cl4cds.dumpFromClassFile=true :
+       Include classes into the output which are loaded from plain classfiles.
+       This is currently not supported by OpenJDK 10 which can only dump
+       classes from .jar files but may change eventually (defaults to 'false')
+----
+
+If you're interested in the current limitations of CDS/AppCDS, their implementation details and performance and memory consumption gains achievable by CDS/AppCDS please read on or visit my talk about https://fosdem.org/2018/schedule/event/class_data_sharing[Class Data Sharing at FOSDEM 2018].
 
 WARNING: the following is work in progress!
 
