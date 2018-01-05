@@ -2,6 +2,7 @@
 :toc:
 :toc-placement!:
 :source-highlighter: pygments
+:icons: font
 ifdef::env-github[]
 :tip-caption: :bulb:
 :note-caption: :information_source:
@@ -16,12 +17,12 @@ endif::[]
 
 If you're only interested in the `cl4cds` utility, you can use it as follows (tested with http://openjdk.java.net/projects/jdk/10/[OpenJDK 10] and https://tomcat.apache.org/download-90.cgi[Tomcat 9]):
 
-[source, console]
+[source, console ,options="nowrap"]
 ----
 $ export JAVA_HOME=JAVA_10_HOME # <1>
-$ export CATALINA_OPTS=-Xlog:class+load:file=/tmp/tomcat.classtrace <2>
-$ CATALINA_HOME/bin/catalina.sh start <3>
-$ CATALINA_HOME/bin/catalina.sh stop <4>
+$ export CATALINA_OPTS=-Xlog:class+load:file=/tmp/tomcat.classtrace # <2>
+$ CATALINA_HOME/bin/catalina.sh start // <3>
+$ CATALINA_HOME/bin/catalina.sh stop // <4>
 $ JAVA_10_HOME/bin/java io.simonis.cl4cds /tmp/tomcat.classtrace /tmp/tomcat.cls
 $ export CATALINA_OPTS="-Xshare:dump -XX:+UseAppCDS -XX:SharedClassListFile=/tmp/tomcat.cls -XX:+UnlockDiagnosticVMOptions -XX:SharedArchiveFile=/tmp/tomcat.jsa" <5>
 $ CATALINA_HOME/bin/catalina.sh start <6>
@@ -76,7 +77,7 @@ In Oracle J2SE 5.0 the usage of CDS was quite restricted - the feature was only 
 
 Before CDS can be used, the so called *Shared Archive* has to be created first:
 
-[source, console]
+[source, console ,options="nowrap"]
 ----
 $ java -Xshare:dump
 Allocated shared space: 50577408 bytes at 0x0000000800000000
@@ -101,7 +102,7 @@ total   :  17472149 [100.0% of total] out of  46272512 bytes [ 37.8% used]
 
 In this simplest form, the `-Xshare:dump` command will use a default class list `JAVA_HOME/lib/classlist` which was created at JDK build time and create the shared class archive under `JAVA_HOME/lib/server/classes.jsa`:
 
-[source, console]
+[source, console ,options="nowrap"]
 ----
 $ (cd JAVA_HOME && ls -o lib/classlist lib/server/classes.jsa)
 -rw-rw-r-- 1 simonis    40580 Okt 23 19:06 lib/classlist
@@ -110,7 +111,7 @@ $ (cd JAVA_HOME && ls -o lib/classlist lib/server/classes.jsa)
 
 `JAVA_HOME/lib/classlist` is a text file which contains the list of classes (one class per line, in https://docs.oracle.com/javase/specs/jvms/se9/html/jvms-4.html#jvms-4.2.1[internal form]) which should be added to the shared class archive:
 
-[source, console]
+[source, console ,options="nowrap"]
 ----
 $ head -5 JAVA_HOME/lib/classlist
 java/lang/Object
@@ -137,7 +138,7 @@ public class HelloCDS {
 
 `-Xshare:on` instructs to VM to use the shared class from the default location at `JAVA_HOME/lib/server/classes.jsa`. If the archive hasn't been created or is corrupted, the VM will exit with an error:
 
-[source, console]
+[source, console ,options="nowrap"]
 ----
 $ rm -f JAVA_HOME/lib/server/classes.jsa
 $ java -Xshare:on HelloCDS
@@ -149,7 +150,7 @@ Unable to use shared archive.
 
 We could instead use `-Xshare:auto` which behaves like `-Xshare:on` if the shared archive is available and automatically falls back to `-Xshare:off` if the shared archive can not be found or used. After recreating the archive, our program will run just fine, but how can we verify which classes get really loaded right from the shared class archive?
 
-[source, console]
+[source, console ,options="nowrap"]
 ----
 $ java -Xshare:on HelloCDS
 Hello CDS
@@ -157,7 +158,7 @@ Hello CDS
 
 Here the class loading log comes in quite handy, because it not only reports which classes are being loaded, but also where they get loaded from in the `source:` section:
 
-[source, console]
+[source, console ,options="nowrap"]
 ----
 $ java -Xshare:on -Xlog:class+load io.simonis.HelloCDS
 [0.011s][info][class,load] opened: /share/output-jdk9-dev-opt/images/jdk/lib/modules
@@ -169,7 +170,7 @@ $ java -Xshare:on -Xlog:class+load io.simonis.HelloCDS
 
 In order to check which classes haven't been loaded from the archive, we can grep for all log entries which don't contain the term `shared objects file`:
 
-[source, console]
+[source, console ,options="nowrap"]
 ----
 $ java -Xshare:on -Xlog:class+load HelloCDS | grep --invert-match "shared objects file"
 [0.014s][info][class,load] opened: /share/output-jdk9-dev-opt/images/jdk/lib/modules
@@ -185,7 +186,7 @@ Hello CDS
 
 As we can see, there are just a few classes from the base module which still get loaded directly from the java runtime image (i.e. from the `lib/modules` file). Obviously they were not referenced or used by the `HelloClasslist` application which was used to generate the default class list under `JAVA_HOME/lib/classlist`. But we can of course generate a new, individual class list for our `HelloCDS` application, much in the same way the default class list was generated at build time (by using the `-XX:DumpLoadedClassList=<classlist_file>` option). Afterwards we use that class list (by using the `-XX:SharedClassListFile=<classlist_file>`) to generate a new, application specific shared archive. If we do not explicitly specify the location of the new archive file with the `-XX:SharedArchiveFile=<classlist_file>` option (which is a diagnostic option so we need `-XX:+UnlockDiagnosticVMOptions` as well) the default archive at `JAVA_HOME/lib/server/classes.jsa` will be silently overwritten.
 
-[source, console]
+[source, console ,options="nowrap"]
 ----
 $ java -XX:DumpLoadedClassList=/tmp/HelloCDS.cls io.simonis.HelloCDS
 $ java -XX:SharedClassListFile=/tmp/HelloCDS.cls -XX:+UnlockDiagnosticVMOptions -XX:SharedArchiveFile=/tmp/HelloCDS.jsa -Xshare:dump
@@ -212,7 +213,7 @@ total   :   7919893 [100.0% of total] out of  46268416 bytes [ 17.1% used]
 
 As you can see, the new archive contains fewer classes (522 compared to 1197 before). We can use the new archive by passing it to the VM with the `-XX:SharedArchiveFile=<classlist_file>` option:
 
-[source, console]
+[source, console ,options="nowrap"]
 ----
 $ java -Xshare:on -Xlog:class+load -XX:+UnlockDiagnosticVMOptions -XX:SharedArchiveFile=/tmp/HelloCDS.jsa io.simonis.HelloCDS | grep --invert-match "shared objects file"
 [0.010s][info][class,load] opened: /share/output-jdk9-dev-opt/images/jdk/lib/modules
@@ -226,7 +227,7 @@ This time all the classes except our application class `io.simonis.HelloCDS` hav
 
 So let's see if CDS makes any difference if it comes to start-up performance by using the `time` utility to measure the elapsed wall clock time (the output below actually shows the average of five runs in a row):
 
-[source, console]
+[source, console ,options="nowrap"]
 ----
 $ time -f "%e sec\n" java -Xshare:off -XX:+UnlockDiagnosticVMOptions -XX:SharedArchiveFile=/tmp/HelloCDS.jsa io.simonis.HelloCDS
 Hello CDS
@@ -238,7 +239,7 @@ Hello CDS
 
 So it seems like CDS gives us about 9% better performance although we've actually measured the overall execution time here. We can do a little better by measuring the time it needs until our application class gets loaded (again showing the average  of five consecutive runs):
 
-[source, console]
+[source, console ,options="nowrap"]
 ----
 $ time -f "%e sec\n" java -Xshare:off -XX:+UnlockDiagnosticVMOptions -XX:SharedArchiveFile=/tmp/HelloCDS.jsa -Xlog:class+load io.simonis.HelloCDS | grep HelloCDS
 [0,164s][info][class,load] io.simonis.HelloCDS source: file:/FOSDEM2018/git/examples/bin/
@@ -268,39 +269,39 @@ public class HelloCDS2 {
 
 Now we can use various utilities to compare the consumed memory.
 
-[source, console]
+[source, console ,options="nowrap"]
 ----
 $ java -XX:DumpLoadedClassList=/tmp/HelloCDS2.cls io.simonis.HelloCDS2
 $ java -XX:SharedClassListFile=/tmp/HelloCDS2.cls -XX:+UnlockDiagnosticVMOptions -XX:SharedArchiveFile=/tmp/HelloCDS2.jsa -Xshare:dump
 $ java -Xshare:off -XX:+UnlockDiagnosticVMOptions -XX:SharedArchiveFile=/tmp/HelloCDS2.jsa -Xint io.simonis.HelloCDS2 <1><2>
-<1> First we run without CDS (i.e. -Xshare:off)
-<2> For this test we run in interpreter only mode (i.e. -Xint) because the JIT compilers will result in slightly different memory consumptions (because of different Code Cache layouts) due to timing variations.
 ----
+<1> First we run without CDS (i.e. `-Xshare:off`)
+<2> For this test we run in interpreter only mode (i.e. `-Xint`) because the JIT compilers will result in slightly different memory consumptions (because of different Code Cache layouts) due to timing variations.
 
 First we try with the common Linux system tools like `ps`, `top` and `pmap`:
 
 IMPORTANT: In order to get comparable results, we have to switch of _Address Space Layout Randomization_ (ASLR) by executing `sudo sh -c "echo 0 > /proc/sys/kernel/randomize_va_space"`.
 
-[source, console]
+[source, console, options="nowrap", subs="+macros"]
 ----
 $ top -n 1 -p `pgrep -f HelloCDS2`
   ...
   PID USER      PR  NI    VIRT    RES    SHR S  %CPU %MEM     TIME+ COMMAND
-11772 simonis   20   0 4888828  28032  15172 S   0,0  0,3   0:00.18 java
+11772 simonis   20   0 4888828  +++<mark>28032</mark>+++  15172 S   0,0  0,3   0:00.18 java
 $ ps -o pid,user,vsize,rss,comm `pgrep -f HelloCDS2`
    PID USER        VSZ   RSS COMMAND
- 11772 simonis  4888828 28032 java
+ 11772 simonis  4888828 +++<mark>28032</mark>+++ java
 $ pmap `pgrep -f HelloCDS2` |  sed -n -e '2p;$p' <1>
           Address    Size   Rss   Pss Shared_Clean Shared_Dirty Private_Clean Private_Dirty Mapping
-                  4888832 28556 25689         2896            0         12508         13152 KB
-<1> Magical `sed` command which outputs the second and the last line of its input
+                  4888832 +++<mark>28556</mark>+++ 25689         2896            0         12508         13152 KB
 ----
+<1> Magical `sed` command which outputs the second and the last line of its input
 
-As we can see, `ps` and `top` agree on the same values for the mapped virtual memory (i.e. 5221656 KB) and the amount of memory which is really committed to RAM (i.e. the so called _Residetn Set Size_ or RSS, 33636 KB). `pmap` reports slightly higher values but is known to provide the most accurate information. Moreover, `pmap` also details the RSS into shared and private memory which will be important for our further investigations. A description of the various values reported can be found in this nice, graphical http://www.software-architect.net/blog/article/date/2015/07/03/cheat-sheet-understanding-the-pmap1-output.html[pmap cheat sheet] or directly from the https://www.kernel.org/doc/Documentation/filesystems/proc.txt[Linux Kernel `proc` file system documentation].
+As we can see, `ps` and `top` agree on the same values for the mapped virtual memory (i.e. 4888828 KB) and the amount of memory which is really committed to RAM (i.e. the so called _Residetn Set Size_ or RSS, 28032 KB). `pmap` reports slightly higher values but is known to provide the most accurate information. Moreover, `pmap` also details the RSS into shared and private memory which will be important for our further investigations. A description of the various values reported can be found in this nice, graphical http://www.software-architect.net/blog/article/date/2015/07/03/cheat-sheet-understanding-the-pmap1-output.html[pmap cheat sheet] or directly from the https://www.kernel.org/doc/Documentation/filesystems/proc.txt[Linux Kernel `proc` file system documentation].
 
 Now lets what happens when we we use CDS:
 
-[source, console]
+[source, console ,options="nowrap"]
 ----
 $ java -Xshare:on -XX:+UnlockDiagnosticVMOptions -XX:SharedArchiveFile=/tmp/HelloCDS2.jsa -Xint io.simonis.HelloCDS2 <1>
 $ pmap `pgrep -f HelloCDS2` | sed -n -e '2p;$p'
@@ -317,6 +318,7 @@ $ kill `pgrep -f HelloCDS2 | tail -1` <7>
 $ pmap --read-rc-from=/tmp/pmap.rc `pgrep -f HelloCDS2` |  sed -n -e '2p;$p'
          Address    Size   Rss   Pss Shared_Clean Shared_Dirty Private_Clean Private_Dirty Mapping
                  4896596 32888 29991         2928            0         18664         11296 KB <8>
+----
 <1> Turn on Class Data Sharing (i.e. `-Xshare:on`)
 <2> Now start a second instance of `io.simonis.HelloCDS2`
 <3> Get the `pmap` statistics of the first process one more time (assumes that PIDs are assigned incrementally)
@@ -325,7 +327,6 @@ $ pmap --read-rc-from=/tmp/pmap.rc `pgrep -f HelloCDS2` |  sed -n -e '2p;$p'
 <6> The `Size`/`RSS` values of the second process are exactly the same like for the first process
 <7> Kill the second process..
 <8> ..and run `pmap` on the first process one more time (the amount of shared memory drops back to `2928 KB`)
-----
 
 ////
 simonis@simonis:/tmp$ pmap --read-rc-from=/tmp/pmap.rc `pgrep -f HelloCDS2 | head -1` |  egrep "(Mapping|KB|.jsa)"
