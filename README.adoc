@@ -227,26 +227,26 @@ This time all the classes except our application class `io.simonis.HelloCDS` hav
 
 So let's see if CDS makes any difference if it comes to start-up performance by using the `time` utility to measure the elapsed wall clock time (the output below actually shows the average of five runs in a row):
 
-[source, console ,options="nowrap"]
+[source, console ,options="nowrap", subs="+macros"]
 ----
 $ time -f "%e sec\n" java -Xshare:off -XX:+UnlockDiagnosticVMOptions -XX:SharedArchiveFile=/tmp/HelloCDS.jsa io.simonis.HelloCDS
 Hello CDS
-0.162 sec
++++<mark>0.162 sec</mark>+++
 $ time -f "%e sec\n" java -Xshare:on -XX:+UnlockDiagnosticVMOptions -XX:SharedArchiveFile=/tmp/HelloCDS.jsa io.simonis.HelloCDS
 Hello CDS
-0.148 sec
++++<mark>0.148 sec</mark>+++
 ----
 
 So it seems like CDS gives us about 9% better performance although we've actually measured the overall execution time here. We can do a little better by measuring the time it needs until our application class gets loaded (again showing the average  of five consecutive runs):
 
-[source, console ,options="nowrap"]
+[source, console ,options="nowrap", subs="+macros"]
 ----
 $ time -f "%e sec\n" java -Xshare:off -XX:+UnlockDiagnosticVMOptions -XX:SharedArchiveFile=/tmp/HelloCDS.jsa -Xlog:class+load io.simonis.HelloCDS | grep HelloCDS
 [0,164s][info][class,load] io.simonis.HelloCDS source: file:/FOSDEM2018/git/examples/bin/
-0.178 sec
++++<mark>0.178 sec</mark>+++
 $ time -f "%e sec\n" java -Xshare:on -XX:+UnlockDiagnosticVMOptions -XX:SharedArchiveFile=/tmp/HelloCDS.jsa -Xlog:class+load io.simonis.HelloCDS | grep HelloCDS
 [0,143s][info][class,load] io.simonis.HelloCDS source: file:/FOSDEM2018/git/examples/bin/
-0.160 sec
++++<mark>0.160 sec</mark>+++
 ----
 
 Notice that the overall execution time has slightly increased because of the additional logging but the time until our `HelloCDS` class gets loaded is about 13% faster with CDS compared to the default run without CDS.
@@ -255,28 +255,30 @@ Notice that the overall execution time has slightly increased because of the add
 
 In order to gather some memory consumption statistics, we slightly extend our example program to read a byte from the standard input stream before exiting:
 
-[source, java]
+[source, java, options="nowrap", subs="+macros"]
 ----
 package io.simonis;
 
 public class HelloCDS2 {
   public static void main(String[] args) throws java.io.IOException {
     System.out.println("Hello CDS");
-    System.in.read();
+    +++<mark>System.in.read();</mark>+++
   }
 }
 ----
 
-Now we can use various utilities to compare the consumed memory.
+Now we can use various utilities to compare the consumed memory, but before that we create a new archive for our program:
 
 [source, console ,options="nowrap"]
 ----
-$ java -XX:DumpLoadedClassList=/tmp/HelloCDS2.cls io.simonis.HelloCDS2
-$ java -XX:SharedClassListFile=/tmp/HelloCDS2.cls -XX:+UnlockDiagnosticVMOptions -XX:SharedArchiveFile=/tmp/HelloCDS2.jsa -Xshare:dump
-$ java -Xshare:off -XX:+UnlockDiagnosticVMOptions -XX:SharedArchiveFile=/tmp/HelloCDS2.jsa -Xint io.simonis.HelloCDS2 <1><2>
+$ java -XX:DumpLoadedClassList=/tmp/HelloCDS2.cls io.simonis.HelloCDS2 <1>
+$ java -XX:SharedClassListFile=/tmp/HelloCDS2.cls -XX:+UnlockDiagnosticVMOptions -XX:SharedArchiveFile=/tmp/HelloCDS2.jsa -Xshare:dump <2>
+$ java -Xshare:off -XX:+UnlockDiagnosticVMOptions -XX:SharedArchiveFile=/tmp/HelloCDS2.jsa -Xint io.simonis.HelloCDS2 <3><4>
 ----
-<1> First we run without CDS (i.e. `-Xshare:off`)
-<2> For this test we run in interpreter only mode (i.e. `-Xint`) because the JIT compilers will result in slightly different memory consumptions (because of different Code Cache layouts) due to timing variations.
+<1> We create the class list of the loaded system classes..
+<2> ..and dump them to `/tmp/HelloCDS2.jsa`
+<3> We run the first test without CDS (i.e. `-Xshare:off`) ..
+<4> ..and in interpreter only mode (i.e. `-Xint`) because the JIT compilers will result in slightly different memory consumptions (because of different Code Cache layouts) due to timing variations.
 
 First we try with the common Linux system tools like `ps`, `top` and `pmap`:
 
@@ -293,11 +295,33 @@ $ ps -o pid,user,vsize,rss,comm `pgrep -f HelloCDS2`
  11772 simonis  4888828 +++<mark>28032</mark>+++ java
 $ pmap `pgrep -f HelloCDS2` |  sed -n -e '2p;$p' <1>
           Address    Size   Rss   Pss Shared_Clean Shared_Dirty Private_Clean Private_Dirty Mapping
-                  4888832 +++<mark>28556</mark>+++ 25689         2896            0         12508         13152 KB
+                  4888832 +++<mark>28484</mark>+++ 25572         2956            0         12376         13152 KB
 ----
 <1> Magical `sed` command which outputs the second and the last line of its input
 
 As we can see, `ps` and `top` agree on the same values for the mapped virtual memory (i.e. 4888828 KB) and the amount of memory which is really committed to RAM (i.e. the so called _Residetn Set Size_ or RSS, 28032 KB). `pmap` reports slightly higher values but is known to provide the most accurate information. Moreover, `pmap` also details the RSS into shared and private memory which will be important for our further investigations. A description of the various values reported can be found in this nice, graphical http://www.software-architect.net/blog/article/date/2015/07/03/cheat-sheet-understanding-the-pmap1-output.html[pmap cheat sheet] or directly from the https://www.kernel.org/doc/Documentation/filesystems/proc.txt[Linux Kernel `proc` file system documentation].
+
+Now we start a second instance of our application to see how the shared memory consumption of the two processes changes:
+
+[source, console, options="nowrap", subs="+macros"]
+----
+$ java -Xshare:off -XX:+UnlockDiagnosticVMOptions -XX:SharedArchiveFile=/tmp/HelloCDS2.jsa -Xint io.simonis.HelloCDS2
+$ pmap `pgrep -f HelloCDS2 | head -1` |  sed -n -e '2p;$p' <1>
+         Address    Size   Rss   Pss Shared_Clean Shared_Dirty Private_Clean Private_Dirty Mapping
+                 4888832 +++<mark>28484</mark>+++ +++<mark>19396</mark>+++        +++<mark>15304</mark>+++            0            28         13152 KB
+$ pmap `pgrep -f HelloCDS2 | tail -1` |  sed -n -e '2p;$p' <2>
+         Address    Size   Rss   Pss Shared_Clean Shared_Dirty Private_Clean Private_Dirty Mapping
+                 4888832 +++<mark>28484</mark>+++ +++<mark>19396</mark>+++        +++<mark>15304</mark>+++            0             0         13180 KB
+----
+<1> Get the `pmap` statistics of the first process one more time (assumes that PIDs are assigned incrementally)
+<2> Get the `pmap` statistics of the second process (assumes that PIDs are assigned incrementally)
+
+After the second instance has been started, neither the virtual nor the committed memory consumption of the first process has changed. Furthermore the second process has the exact same memory footprint like the first one. However, after the start of the second process, we can observe that the amount of shared memory of process one has increased from `2956 KB` to `15304 KB` which leads to a decrease in the process' _Proportional Set Size_ (PSS) from `25572 KB` down to `19396 KB`.
+
+[quote, www.kernel.org, T H E  /proc   F I L E S Y S T E M]
+The "proportional set size" (PSS) of a process is the count of pages it has in memory, where each page is divided by the number of processes sharing it. So if a process has 1000 pages all to itself, and 1000 shared with one other process, its PSS will be 1500. Note that even a page which is part of a MAP_SHARED mapping, but has only a single pte mapped, i.e.  is currently used by only one process, is accounted as private and not as shared.
+
+For the Java VM, all the read-only parts of the loaded shared libraries (i.e. `libjvm.so`) can be shared between all the VM instances running at the same time. This explains why taking together, the two VM's consume less memory (i.e. have a smaller memory footprint) than the simple sum of their single resident set sizes. Notice that already the first instance had a PSS value which was smaller than the process' RSS value, because it used parts of libraries (i.e. `libc.so`) which were already mapped into the memory by other processes.
 
 Now lets what happens when we we use CDS:
 
@@ -321,8 +345,8 @@ $ pmap --read-rc-from=/tmp/pmap.rc `pgrep -f HelloCDS2` |  sed -n -e '2p;$p'
 ----
 <1> Turn on Class Data Sharing (i.e. `-Xshare:on`)
 <2> Now start a second instance of `io.simonis.HelloCDS2`
-<3> Get the `pmap` statistics of the first process one more time (assumes that PIDs are assigned incrementally)
-<4> Get the `pmap` statistics of the second process (assumes that PIDs are assigned incrementally)
+<3> Get the `pmap` statistics of the first process one more time
+<4> Get the `pmap` statistics of the second process
 <5> The `Size`/`RSS` values are still the same, but the amount of shared memory increases from `2928 KB` to `21560 KB`
 <6> The `Size`/`RSS` values of the second process are exactly the same like for the first process
 <7> Kill the second process..
