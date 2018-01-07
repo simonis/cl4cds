@@ -1,0 +1,634 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<!--[if IE]><meta http-equiv="X-UA-Compatible" content="IE=edge"><![endif]-->
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="generator" content="Asciidoctor 1.5.6.1">
+<title>cl4cds</title>
+<link rel="stylesheet" href="./styles/riak.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.6.3/css/font-awesome.min.css">
+<link rel="stylesheet" href="./styles/pygments-manni.css">
+</head>
+<body class="article">
+<div id="header">
+<h1>cl4cds</h1>
+</div>
+<div id="content">
+<div id="preamble">
+<div class="sectionbody">
+<div class="paragraph">
+<p><code>cl4cds</code> is a little tool which helps exploring the new Application Class Data Sharing (AppCDS) feature in OpenJDK 10. AppCDS allows sharing of application classes even if they get loaded by a custom class loaders, but unfortunately there&#8217;s currently no default tooling available to make this feature accessible to end users. That&#8217;s where <code>cl4cds</code> (which is an acronym for "class list for class data sharing") kicks in. It converts a class list obtained from running your application with <code>Xlog:class+load</code> to a format which can be passed to the VM as a parameter of the <code>-XX:SharedClassListFile=</code> option. This article documents the <code>cl4cds</code> tool but at the same time also describes the implementation and the benefits of the ovarall CDS/AppCDS features.</p>
+</div>
+</div>
+</div>
+<div class="sect1">
+<h2 id="_tl_dr">TL;DR</h2>
+<div class="sectionbody">
+<div class="paragraph">
+<p>If you&#8217;re only interested in the <code>cl4cds</code> utility, you can use it as follows (tested with <a href="http://openjdk.java.net/projects/jdk/10/">OpenJDK 10</a> and <a href="https://tomcat.apache.org/download-90.cgi">Tomcat 9</a>):</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="pygments highlight nowrap"><code data-lang="console"><span></span><span class="tok-gp">$</span> <span class="tok-nb">export</span> <span class="tok-nv">JAVA_HOME</span><span class="tok-o">=</span>JAVA_10_HOME <i class="conum" data-value="1"></i><b>(1)</b>
+<span class="tok-gp">$</span> <span class="tok-nb">export</span> <span class="tok-nv">CATALINA_OPTS</span><span class="tok-o">=</span>-Xlog:class+load:file<span class="tok-o">=</span>/tmp/tomcat.classtrace <i class="conum" data-value="2"></i><b>(2)</b>
+<span class="tok-gp">$</span> CATALINA_HOME/bin/catalina.sh start <i class="conum" data-value="3"></i><b>(3)</b>
+<span class="tok-gp">$</span> CATALINA_HOME/bin/catalina.sh stop <i class="conum" data-value="4"></i><b>(4)</b>
+<span class="tok-gp">$</span> JAVA_10_HOME/bin/java io.simonis.cl4cds /tmp/tomcat.classtrace /tmp/tomcat.cls
+<span class="tok-gp">$</span> <span class="tok-nb">export</span> <span class="tok-nv">CATALINA_OPTS</span><span class="tok-o">=</span><span class="tok-s2">&quot;-Xshare:dump -XX:+UseAppCDS -XX:SharedClassListFile=/tmp/tomcat.cls -XX:+UnlockDiagnosticVMOptions -XX:SharedArchiveFile=/tmp/tomcat.jsa&quot;</span> <i class="conum" data-value="5"></i><b>(5)</b>
+<span class="tok-gp">$</span> CATALINA_HOME/bin/catalina.sh start <i class="conum" data-value="6"></i><b>(6)</b>
+<span class="tok-gp">$</span> <span class="tok-nb">export</span> <span class="tok-nv">CATALINA_OPTS</span><span class="tok-o">=</span><span class="tok-s2">&quot;-Xshare:on -XX:+UseAppCDS -XX:+UnlockDiagnosticVMOptions -XX:SharedArchiveFile=/tmp/tomcat.jsa&quot;</span> <i class="conum" data-value="7"></i><b>(7)</b>
+<span class="tok-gp">$</span> CATALINA_HOME/bin/catalina.sh start <i class="conum" data-value="8"></i><b>(8)</b></code></pre>
+</div>
+</div>
+<div class="colist arabic">
+<table>
+<tr>
+<td><i class="conum" data-value="1"></i><b>1</b></td>
+<td>AppCDS only works with OpenJDK 10 and higher</td>
+</tr>
+<tr>
+<td><i class="conum" data-value="2"></i><b>2</b></td>
+<td>Trace all the classes which get loaded into the file <code>/tmp/tomcat.classtrace</code></td>
+</tr>
+<tr>
+<td><i class="conum" data-value="3"></i><b>3</b></td>
+<td>Start Tomcat and run your application</td>
+</tr>
+<tr>
+<td><i class="conum" data-value="4"></i><b>4</b></td>
+<td>Stop Tomcat</td>
+</tr>
+<tr>
+<td><i class="conum" data-value="5"></i><b>5</b></td>
+<td>Set the options for creating a shared class archive in <code>/tmp/tomcat.jsa</code> (<code>-XX:SharedArchiveFile</code> is a diagnostic option so we have to enable it first by using <code>-XX:+UnlockDiagnosticVMOptions</code>)</td>
+</tr>
+<tr>
+<td><i class="conum" data-value="6"></i><b>6</b></td>
+<td>Restart Tomcat to dump the shared class archive</td>
+</tr>
+<tr>
+<td><i class="conum" data-value="7"></i><b>7</b></td>
+<td>Set the options for using the shared class archive from <code>/tmp/tomcat.jsa</code></td>
+</tr>
+<tr>
+<td><i class="conum" data-value="8"></i><b>8</b></td>
+<td>From now on, Tomcat will load available classes (both, system and application ones) from the shared archive if available.</td>
+</tr>
+</table>
+</div>
+<div class="paragraph">
+<p>The current <code>cl4cds</code> command line options are as follows:</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre>io.simonis.cl4cds [&lt;class-trace-file&gt; [&lt;class-list-file&gt;]]
+
+  &lt;class-trace-file&gt;: class trace output obtained by running -Xlog:class+load
+                      if not specified read from &lt;stdin&gt;
+  &lt;class-list-file&gt; : class list which can be passed to -XX:SharedClassListFile
+                      if not specified written to &lt;stdout&gt;
+
+  The following properties can be used to configure cl4cds:
+    -Dio.simonis.cl4cds.debug=true :
+       Print additional tracig to &lt;stderr&gt; (defaults to 'false')
+    -Dio.simonis.cl4cds.dumpFromClassFile=true :
+       Include classes into the output which are loaded from plain classfiles.
+       This is currently not supported by OpenJDK 10 which can only dump
+       classes from .jar files but may change eventually (defaults to 'false')</pre>
+</div>
+</div>
+<div class="paragraph">
+<p>If you&#8217;re interested in the implementation details of CDS/AppCDS, their current limitations and their performance and memory characteristics please read on
+or visit my talk about <a href="https://fosdem.org/2018/schedule/event/class_data_sharing">Class Data Sharing at FOSDEM 2018</a>.</p>
+</div>
+<div class="admonitionblock warning">
+<table>
+<tr>
+<td class="icon">
+<i class="fa icon-warning" title="Warning"></i>
+</td>
+<td class="content">
+the following is work in progress!
+</td>
+</tr>
+</table>
+</div>
+<div id="toc" class="toc">
+<div id="toctitle" class="title">Table of Contents</div>
+<ul class="sectlevel1">
+<li><a href="#_tl_dr">TL;DR</a></li>
+<li><a href="#_class_data_sharing">Class Data Sharing</a></li>
+<li><a href="#_using_cds">Using CDS</a>
+<ul class="sectlevel2">
+<li><a href="#_cds_performance_benefits">CDS performance benefits</a></li>
+<li><a href="#_cds_memory_savings">CDS memory savings</a></li>
+<li><a href="#_cds_summary">CDS summary</a></li>
+</ul>
+</li>
+</ul>
+</div>
+</div>
+</div>
+<div class="sect1">
+<h2 id="_class_data_sharing">Class Data Sharing</h2>
+<div class="sectionbody">
+<div class="paragraph">
+<p>Class Data Sharing (CDS) is a feature to improve startup performance and reduce the memory footprint of the HotSpot JVM by storing the preprocessed metadata of system classes to disk and sharing them between virtual machines running on the same host. It was introduced as early as 2004 with the first release of <a href="https://docs.oracle.com/javase/1.5.0/docs/guide/vm/class-data-sharing.html">Oracle&#8217;s Java 5 release</a> and later became available in the first version of OpenJDK (i.e. <a href="http://hg.openjdk.java.net/jdk6/jdk6">jdk6</a>). During the last years, this feature has been constantly extended and improved. Oracle JDK 9 introduced <a href="https://docs.oracle.com/javase/9/tools/java.htm#JSWOR-GUID-31503FCE-93D0-4175-9B4F-F6A738B2F4C4">AppCDS</a> as a commercial feature only, which additionally allows the caching and sharing of application classes, strings and symbols. This commercial feature will be open sourced and made freely available in OpenJDK 10 by <a href="http://openjdk.java.net/jeps/310">JEP 310: Application Class-Data Sharing</a>.</p>
+</div>
+<div class="paragraph">
+<p>Starting with their Java SDK 6.0, IBM also started to support <a href="https://www.ibm.com/support/knowledgecenter/en/SSYKE2_6.0.0/com.ibm.java.doc.user.lnx.60/user/shc_overview.html">Class Data Sharing</a>. They not only supported system class but also classes loaded by the application class loader (a.k.a. system class loader), classes loaded by <a href="https://www.ibm.com/support/knowledgecenter/SSYKE2_6.0.0/com.ibm.java.doc.user.lnx.60/user/adaptingclassloaders.html?view=kc#adaptingclassloaders">custom class loaders</a> and even ahead-of-time (AOT) compiled code (which was not shared between JVMs). While IBM J9&#8217;s CDS addresses similar problems like the HotSpot class data sharing feature in Oracle/OpenJDK, it is technically a completely independent implementation. Although it is much more mature and elaborate compared to the HotSpot implementation, J9&#8217;s CDS hasn&#8217;t attracted that much attention simply because Oracle/OpenJDK has been the predominant JVM in the past decade. But that might change with the open sourcing of the IBM J9 JVM within the <a href="https://www.eclipse.org/openj9/">Eclipse OpenJ9</a> project.</p>
+</div>
+<div class="paragraph">
+<p>This article will only cover the HotSpot CDS functionality and implementation. If you&#8217;re interested in the J9/OpenJ9 implementation you may have a look at the <a href="https://www.ibm.com/support/knowledgecenter/en/SSYKE2_9.0.0/com.ibm.java.multiplatform.90.doc/user/classdatasharing.html">latest documentation</a>, watch the presentation about "OpenJ9: Under the hood of the next open source JVM" from <a href="https://www.youtube.com/watch?v=3VporpPlDds">Geekon 2017 / Krakow</a> or <a href="https://www.youtube.com/watch?v=96XoG6xcnys">Devoxx 2017 / Poland</a> or simply <a href="https://adoptopenjdk.net/releases.html?variant=openjdk9-openj9">download OpenJ9</a> and run <code>java -Xshareclasses:help</code> :wink:</p>
+</div>
+</div>
+</div>
+<div class="sect1">
+<h2 id="_using_cds">Using CDS</h2>
+<div class="sectionbody">
+<div class="paragraph">
+<p>In Oracle J2SE 5.0 the usage of CDS was quite restricted - the feature was only available in the Client VM when running with the Serial GC. Meanwhile, <a href="https://docs.oracle.com/javase/9/vm/class-data-sharing.htm#JSJVM-GUID-0260F857-A70E-4399-A1DF-A5766BE33285">Oracle/OpenJDK 9 CDS</a> also supports the G1, Serial, Parallel, and ParallelOld GCs with the Server VM. The following examples are all based on OpenJDK 9.</p>
+</div>
+<div class="paragraph">
+<p>Before CDS can be used, the so called <strong>Shared Archive</strong> has to be created first:</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="pygments highlight nowrap"><code data-lang="console"><span></span><span class="tok-gp">$</span> java -Xshare:dump
+<span class="tok-go">Allocated shared space: 50577408 bytes at 0x0000000800000000</span>
+<span class="tok-go">Loading classes to share ...</span>
+<span class="tok-go">Loading classes to share: done.</span>
+<span class="tok-go">Rewriting and linking classes ...</span>
+<span class="tok-go">Rewriting and linking classes: done</span>
+<span class="tok-go">Number of classes 1197</span>
+<span class="tok-go">    instance classes   =  1183</span>
+<span class="tok-go">    obj array classes  =     6</span>
+<span class="tok-go">    type array classes =     8</span>
+<span class="tok-go">Updating ConstMethods ... done.</span>
+<span class="tok-go">Removing unshareable information ... done.</span>
+<span class="tok-go">ro space:   5332520 [ 30.5% of total] out of  10485760 bytes [ 50.9% used] at 0x0000000800000000</span>
+<span class="tok-go">rw space:   5630560 [ 32.2% of total] out of  10485760 bytes [ 53.7% used] at 0x0000000800a00000</span>
+<span class="tok-go">md space:     98976 [  0.6% of total] out of   4194304 bytes [  2.4% used] at 0x0000000801400000</span>
+<span class="tok-go">mc space:     34053 [  0.2% of total] out of    122880 bytes [ 27.7% used] at 0x0000000801800000</span>
+<span class="tok-go">st space:     12288 [  0.1% of total] out of     12288 bytes [100.0% used] at 0x00000000fff00000</span>
+<span class="tok-go">od space:   6363752 [ 36.4% of total] out of  20971520 bytes [ 30.3% used] at 0x000000080181e000</span>
+<span class="tok-go">total   :  17472149 [100.0% of total] out of  46272512 bytes [ 37.8% used]</span></code></pre>
+</div>
+</div>
+<div class="paragraph">
+<p>In this simplest form, the <code>-Xshare:dump</code> command will use a default class list <code>JAVA_HOME/lib/classlist</code> which was created at JDK build time and create the shared class archive under <code>JAVA_HOME/lib/server/classes.jsa</code>:</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="pygments highlight nowrap"><code data-lang="console"><span></span><span class="tok-gp">$</span> <span class="tok-o">(</span><span class="tok-nb">cd</span> JAVA_HOME <span class="tok-o">&amp;&amp;</span> ls -o lib/classlist lib/server/classes.jsa<span class="tok-o">)</span>
+<span class="tok-go">-rw-rw-r-- 1 simonis    40580 Okt 23 19:06 lib/classlist</span>
+<span class="tok-go">-r--r--r-- 1 simonis 17485824 Dez 30 11:39 lib/server/classes.jsa</span></code></pre>
+</div>
+</div>
+<div class="paragraph">
+<p><code>JAVA_HOME/lib/classlist</code> is a text file which contains the list of classes (one class per line, in <a href="https://docs.oracle.com/javase/specs/jvms/se9/html/jvms-4.html#jvms-4.2.1">internal form</a>) which should be added to the shared class archive:</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="pygments highlight nowrap"><code data-lang="console"><span></span><span class="tok-gp">$</span> head -5 JAVA_HOME/lib/classlist
+<span class="tok-go">java/lang/Object</span>
+<span class="tok-go">java/lang/String</span>
+<span class="tok-go">java/io/Serializable</span>
+<span class="tok-go">java/lang/Comparable</span>
+<span class="tok-go">java/lang/CharSequence</span></code></pre>
+</div>
+</div>
+<div class="paragraph">
+<p>As mentioned before, the <code>classlist</code> file is created at JDK build-time (controlled by the <code>--enable-generate-classlist</code>/<code>--disable-generate-classlist</code> flag which defaults to true on platforms which support CDS) by running a simple Java program called <a href="http://hg.openjdk.java.net/jdk/jdk/file/tip/make/jdk/src/classes/build/tools/classlist/HelloClasslist.java"><code>HelloClasslist</code></a> (see <a href="http://hg.openjdk.java.net/jdk/jdk/file/tip/make/GenerateLinkOptData.gmk">GenerateLinkOptData.gmk</a>) with the <code>-XX:DumpLoadedClassList=&lt;classlist_file&gt;</code> option to collect the system classes it uses. Of course, <code>HelloClasslist</code> is only a simple approximation for the amount of system classes a typical, small Java application will use.</p>
+</div>
+<div class="paragraph">
+<p>We can now take a simple <code>HelloCDS</code> Java program and run it with <code>-Xshare:on</code> to take advantage of the shared class archive:</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="pygments highlight"><code data-lang="java"><span></span><span class="tok-kn">package</span> <span class="tok-nn">io.simonis</span><span class="tok-o">;</span>
+
+<span class="tok-kd">public</span> <span class="tok-kd">class</span> <span class="tok-nc">HelloCDS</span> <span class="tok-o">{</span>
+  <span class="tok-kd">public</span> <span class="tok-kd">static</span> <span class="tok-kt">void</span> <span class="tok-nf">main</span><span class="tok-o">(</span><span class="tok-n">String</span><span class="tok-o">[]</span> <span class="tok-n">args</span><span class="tok-o">)</span> <span class="tok-o">{</span>
+    <span class="tok-n">System</span><span class="tok-o">.</span><span class="tok-na">out</span><span class="tok-o">.</span><span class="tok-na">println</span><span class="tok-o">(</span><span class="tok-s">&quot;Hello CDS&quot;</span><span class="tok-o">);</span>
+  <span class="tok-o">}</span>
+<span class="tok-o">}</span></code></pre>
+</div>
+</div>
+<div class="paragraph">
+<p><code>-Xshare:on</code> instructs to VM to use the shared class from the default location at <code>JAVA_HOME/lib/server/classes.jsa</code>. If the archive hasn&#8217;t been created or is corrupted, the VM will exit with an error:</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="pygments highlight nowrap"><code data-lang="console"><span></span><span class="tok-gp">$</span> rm -f JAVA_HOME/lib/server/classes.jsa
+<span class="tok-gp">$</span> java -Xshare:on HelloCDS
+<span class="tok-go">An error has occurred while processing the shared archive file.</span>
+<span class="tok-go">Specified shared archive not found.</span>
+<span class="tok-go">Error occurred during initialization of VM</span>
+<span class="tok-go">Unable to use shared archive.</span></code></pre>
+</div>
+</div>
+<div class="paragraph">
+<p>We could instead use <code>-Xshare:auto</code> which behaves like <code>-Xshare:on</code> if the shared archive is available and automatically falls back to <code>-Xshare:off</code> if the shared archive can not be found or used. After recreating the archive, our program will run just fine, but how can we verify which classes get really loaded right from the shared class archive?</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="pygments highlight nowrap"><code data-lang="console"><span></span><span class="tok-gp">$</span> java -Xshare:on HelloCDS
+<span class="tok-go">Hello CDS</span></code></pre>
+</div>
+</div>
+<div class="paragraph">
+<p>Here the class loading log comes in quite handy, because it not only reports which classes are being loaded, but also where they get loaded from in the <code>source:</code> section:</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="pygments highlight nowrap"><code data-lang="console"><span></span><span class="tok-gp">$</span> java -Xshare:on -Xlog:class+load io.simonis.HelloCDS
+<span class="tok-go">[0.011s][info][class,load] opened: /share/output-jdk9-dev-opt/images/jdk/lib/modules</span>
+<span class="tok-go">[0.024s][info][class,load] java.lang.Object source: shared objects file</span>
+<span class="tok-go">[0.024s][info][class,load] java.io.Serializable source: shared objects file</span>
+<span class="tok-go">[0.024s][info][class,load] java.lang.Comparable source: shared objects file</span>
+<span class="tok-go">...</span></code></pre>
+</div>
+</div>
+<div class="paragraph">
+<p>In order to check which classes haven&#8217;t been loaded from the archive, we can grep for all log entries which don&#8217;t contain the term <code>shared objects file</code>:</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="pygments highlight nowrap"><code data-lang="console"><span></span><span class="tok-gp">$</span> java -Xshare:on -Xlog:class+load HelloCDS <span class="tok-p">|</span> grep --invert-match <span class="tok-s2">&quot;shared objects file&quot;</span>
+<span class="tok-go">[0.014s][info][class,load] opened: /share/output-jdk9-dev-opt/images/jdk/lib/modules</span>
+<span class="tok-go">[0,073s][info][class,load] java.util.ImmutableCollections$ListN source: jrt:/java.base</span>
+<span class="tok-go">[0,079s][info][class,load] jdk.internal.module.ModuleHashes$Builder source: jrt:/java.base</span>
+<span class="tok-go">[0,080s][info][class,load] jdk.internal.module.ModuleHashes$HashSupplier source: jrt:/java.base</span>
+<span class="tok-go">[0,080s][info][class,load] jdk.internal.module.SystemModuleFinder$2 source: jrt:/java.base</span>
+<span class="tok-go">[0,128s][info][class,load] jdk.internal.loader.URLClassPath$FileLoader source: jrt:/java.base</span>
+<span class="tok-go">[0,140s][info][class,load] jdk.internal.loader.URLClassPath$FileLoader$1 source: jrt:/java.base</span>
+<span class="tok-go">[0,149s][info][class,load] io.simonis.HelloCDS source: file:/FOSDEM2018/git/examples/bin/</span>
+<span class="tok-go">Hello CDS</span></code></pre>
+</div>
+</div>
+<div class="paragraph">
+<p>As we can see, there are just a few classes from the base module which still get loaded directly from the java runtime image (i.e. from the <code>lib/modules</code> file). Obviously they were not referenced or used by the <code>HelloClasslist</code> application which was used to generate the default class list under <code>JAVA_HOME/lib/classlist</code>. But we can of course generate a new, individual class list for our <code>HelloCDS</code> application, much in the same way the default class list was generated at build time (by using the <code>-XX:DumpLoadedClassList=&lt;classlist_file&gt;</code> option). Afterwards we use that class list (by using the <code>-XX:SharedClassListFile=&lt;classlist_file&gt;</code>) to generate a new, application specific shared archive. If we do not explicitly specify the location of the new archive file with the <code>-XX:SharedArchiveFile=&lt;classlist_file&gt;</code> option (which is a diagnostic option so we need <code>-XX:+UnlockDiagnosticVMOptions</code> as well) the default archive at <code>JAVA_HOME/lib/server/classes.jsa</code> will be silently overwritten.</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="pygments highlight nowrap"><code data-lang="console"><span></span><span class="tok-gp">$</span> java -XX:DumpLoadedClassList<span class="tok-o">=</span>/tmp/HelloCDS.cls io.simonis.HelloCDS
+<span class="tok-gp">$</span> java -XX:SharedClassListFile<span class="tok-o">=</span>/tmp/HelloCDS.cls -XX:+UnlockDiagnosticVMOptions -XX:SharedArchiveFile<span class="tok-o">=</span>/tmp/HelloCDS.jsa -Xshare:dump
+<span class="tok-go">Allocated shared space: 50577408 bytes at 0x0000000800000000</span>
+<span class="tok-go">Loading classes to share ...</span>
+<span class="tok-go">Loading classes to share: done.</span>
+<span class="tok-go">Rewriting and linking classes ...</span>
+<span class="tok-go">Rewriting and linking classes: done</span>
+<span class="tok-go">Number of classes 522 </span><i class="conum" data-value="1"></i><b>(1)</b>
+<span class="tok-go">    instance classes   =   508</span>
+<span class="tok-go">    obj array classes  =     6</span>
+<span class="tok-go">    type array classes =     8</span>
+<span class="tok-go">Updating ConstMethods ... done.</span>
+<span class="tok-go">Removing unshareable information ... done.</span>
+<span class="tok-go">ro space:   2498200 [ 31.5% of total] out of  10485760 bytes [ 23.8% used] at 0x0000000800000000</span>
+<span class="tok-go">rw space:   2500208 [ 31.6% of total] out of  10485760 bytes [ 23.8% used] at 0x0000000800a00000</span>
+<span class="tok-go">md space:     68760 [  0.9% of total] out of   4194304 bytes [  1.6% used] at 0x0000000801400000</span>
+<span class="tok-go">mc space:     34053 [  0.4% of total] out of    122880 bytes [ 27.7% used] at 0x0000000801800000</span>
+<span class="tok-go">st space:      8192 [  0.1% of total] out of      8192 bytes [100.0% used] at 0x00000000fff00000</span>
+<span class="tok-go">od space:   2810480 [ 35.5% of total] out of  20971520 bytes [ 13.4% used] at 0x000000080181e000</span>
+<span class="tok-go">total   :   7919893 [100.0% of total] out of  46268416 bytes [ 17.1% used]</span></code></pre>
+</div>
+</div>
+<div class="colist arabic">
+<table>
+<tr>
+<td><i class="conum" data-value="1"></i><b>1</b></td>
+<td>The total number of classes dumped to the shared archive file</td>
+</tr>
+</table>
+</div>
+<div class="paragraph">
+<p>As you can see, the new archive contains fewer classes (522 compared to 1197 before). We can use the new archive by passing it to the VM with the <code>-XX:SharedArchiveFile=&lt;classlist_file&gt;</code> option:</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="pygments highlight nowrap"><code data-lang="console"><span></span><span class="tok-gp">$</span> java -Xshare:on -Xlog:class+load -XX:+UnlockDiagnosticVMOptions -XX:SharedArchiveFile<span class="tok-o">=</span>/tmp/HelloCDS.jsa io.simonis.HelloCDS <span class="tok-p">|</span> grep --invert-match <span class="tok-s2">&quot;shared objects file&quot;</span>
+<span class="tok-go">[0.010s][info][class,load] opened: /share/output-jdk9-dev-opt/images/jdk/lib/modules</span>
+<span class="tok-go">[0,176s][info][class,load] io.simonis.HelloCDS source: file:/FOSDEM2018/git/examples/bin/</span>
+<span class="tok-go">Hello CDS</span></code></pre>
+</div>
+</div>
+<div class="paragraph">
+<p>This time all the classes except our application class <code>io.simonis.HelloCDS</code> have been loaded from the shared archive!</p>
+</div>
+<div class="sect2">
+<h3 id="_cds_performance_benefits">CDS performance benefits</h3>
+<div class="paragraph">
+<p>So let&#8217;s see if CDS makes any difference if it comes to start-up performance by using the <code>time</code> utility to measure the elapsed wall clock time (the output below actually shows the average of five runs in a row):</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="pygments highlight nowrap"><code data-lang="console"><span></span><span class="tok-gp">$</span> <span class="tok-nb">time</span> -f <span class="tok-s2">&quot;%e sec\n&quot;</span> java -Xshare:off -XX:+UnlockDiagnosticVMOptions -XX:SharedArchiveFile<span class="tok-o">=</span>/tmp/HelloCDS.jsa io.simonis.HelloCDS
+<span class="tok-go">Hello CDS</span>
+<span class="tok-go"><mark>0.162 sec</mark></span>
+<span class="tok-gp">$</span> <span class="tok-nb">time</span> -f <span class="tok-s2">&quot;%e sec\n&quot;</span> java -Xshare:on -XX:+UnlockDiagnosticVMOptions -XX:SharedArchiveFile<span class="tok-o">=</span>/tmp/HelloCDS.jsa io.simonis.HelloCDS
+<span class="tok-go">Hello CDS</span>
+<span class="tok-go"><mark>0.148 sec</mark></span></code></pre>
+</div>
+</div>
+<div class="paragraph">
+<p>So it seems like CDS gives us about 9% better performance although we&#8217;ve actually measured the overall execution time here. We can do a little better by measuring the time it needs until our application class gets loaded (again showing the average  of five consecutive runs):</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="pygments highlight nowrap"><code data-lang="console"><span></span><span class="tok-gp">$</span> <span class="tok-nb">time</span> -f <span class="tok-s2">&quot;%e sec\n&quot;</span> java -Xshare:off -XX:+UnlockDiagnosticVMOptions -XX:SharedArchiveFile<span class="tok-o">=</span>/tmp/HelloCDS.jsa -Xlog:class+load io.simonis.HelloCDS <span class="tok-p">|</span> grep HelloCDS
+<span class="tok-go">[0,164s][info][class,load] io.simonis.HelloCDS source: file:/FOSDEM2018/git/examples/bin/</span>
+<span class="tok-go"><mark>0.178 sec</mark></span>
+<span class="tok-gp">$</span> <span class="tok-nb">time</span> -f <span class="tok-s2">&quot;%e sec\n&quot;</span> java -Xshare:on -XX:+UnlockDiagnosticVMOptions -XX:SharedArchiveFile<span class="tok-o">=</span>/tmp/HelloCDS.jsa -Xlog:class+load io.simonis.HelloCDS <span class="tok-p">|</span> grep HelloCDS
+<span class="tok-go">[0,143s][info][class,load] io.simonis.HelloCDS source: file:/FOSDEM2018/git/examples/bin/</span>
+<span class="tok-go"><mark>0.160 sec</mark></span></code></pre>
+</div>
+</div>
+<div class="paragraph">
+<p>Notice that the overall execution time has slightly increased because of the additional logging but the time until our <code>HelloCDS</code> class gets loaded is about 13% faster with CDS compared to the default run without CDS.</p>
+</div>
+</div>
+<div class="sect2">
+<h3 id="_cds_memory_savings">CDS memory savings</h3>
+<div class="paragraph">
+<p>In order to gather some memory consumption statistics, we slightly extend our example program to read a byte from the standard input stream before exiting:</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="pygments highlight nowrap"><code data-lang="java"><span></span><span class="tok-kn">package</span> <span class="tok-nn">io.simonis</span><span class="tok-o">;</span>
+
+<span class="tok-kd">public</span> <span class="tok-kd">class</span> <span class="tok-nc">HelloCDS2</span> <span class="tok-o">{</span>
+  <span class="tok-kd">public</span> <span class="tok-kd">static</span> <span class="tok-kt">void</span> <span class="tok-nf">main</span><span class="tok-o">(</span><span class="tok-n">String</span><span class="tok-o">[]</span> <span class="tok-n">args</span><span class="tok-o">)</span> <span class="tok-kd">throws</span> <span class="tok-n">java</span><span class="tok-o">.</span><span class="tok-na">io</span><span class="tok-o">.</span><span class="tok-na">IOException</span> <span class="tok-o">{</span>
+    <span class="tok-n">System</span><span class="tok-o">.</span><span class="tok-na">out</span><span class="tok-o">.</span><span class="tok-na">println</span><span class="tok-o">(</span><span class="tok-s">&quot;Hello CDS&quot;</span><span class="tok-o">);</span>
+    <mark>System.in.read();</mark>
+  <span class="tok-o">}</span>
+<span class="tok-o">}</span></code></pre>
+</div>
+</div>
+<div class="paragraph">
+<p>Now we can use various utilities to compare the consumed memory, but before that we create a new archive for our program:</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="pygments highlight nowrap"><code data-lang="console"><span></span><span class="tok-gp">$</span> java -XX:DumpLoadedClassList<span class="tok-o">=</span>/tmp/HelloCDS2.cls io.simonis.HelloCDS2 <i class="conum" data-value="1"></i><b>(1)</b>
+<span class="tok-gp">$</span> java -XX:SharedClassListFile<span class="tok-o">=</span>/tmp/HelloCDS2.cls -XX:+UnlockDiagnosticVMOptions -XX:SharedArchiveFile<span class="tok-o">=</span>/tmp/HelloCDS2.jsa -Xshare:dump <i class="conum" data-value="2"></i><b>(2)</b>
+<span class="tok-gp">$</span> java -Xshare:off -XX:+UnlockDiagnosticVMOptions -XX:SharedArchiveFile<span class="tok-o">=</span>/tmp/HelloCDS2.jsa -Xint io.simonis.HelloCDS2 <i class="conum" data-value="3"></i><b>(3)</b> <i class="conum" data-value="4"></i><b>(4)</b></code></pre>
+</div>
+</div>
+<div class="colist arabic">
+<table>
+<tr>
+<td><i class="conum" data-value="1"></i><b>1</b></td>
+<td>We create the class list of the loaded system classes..</td>
+</tr>
+<tr>
+<td><i class="conum" data-value="2"></i><b>2</b></td>
+<td>..and dump them to <code>/tmp/HelloCDS2.jsa</code></td>
+</tr>
+<tr>
+<td><i class="conum" data-value="3"></i><b>3</b></td>
+<td>We run the first test without CDS (i.e. <code>-Xshare:off</code>) ..</td>
+</tr>
+<tr>
+<td><i class="conum" data-value="4"></i><b>4</b></td>
+<td>..and in interpreter only mode (i.e. <code>-Xint</code>) because the JIT compilers will result in slightly different memory consumptions (because of different Code Cache layouts) due to timing variations.</td>
+</tr>
+</table>
+</div>
+<div class="paragraph">
+<p>First we try with the common Linux system tools like <code>ps</code>, <code>top</code> and <code>pmap</code>:</p>
+</div>
+<div class="admonitionblock important">
+<table>
+<tr>
+<td class="icon">
+<i class="fa icon-important" title="Important"></i>
+</td>
+<td class="content">
+In order to get comparable results, we have to switch of <em>Address Space Layout Randomization</em> (ASLR) by executing <code>sudo sh -c "echo 0 &gt; /proc/sys/kernel/randomize_va_space"</code>.
+</td>
+</tr>
+</table>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="pygments highlight nowrap"><code data-lang="console"><span></span><span class="tok-gp">$</span> top -n <span class="tok-m">1</span> -p <span class="tok-sb">`</span>pgrep -f HelloCDS2<span class="tok-sb">`</span>
+<span class="tok-go">  ...</span>
+<span class="tok-go">  PID USER      PR  NI    VIRT    RES    SHR S  %CPU %MEM     TIME+ COMMAND</span>
+<span class="tok-go">11772 simonis   20   0 4888828  <mark>28032</mark>  15172 S   0,0  0,3   0:00.18 java</span>
+<span class="tok-gp">$</span> ps -o pid,user,vsize,rss,comm <span class="tok-sb">`</span>pgrep -f HelloCDS2<span class="tok-sb">`</span>
+<span class="tok-go">   PID USER        VSZ   RSS COMMAND</span>
+<span class="tok-go"> 11772 simonis  4888828 <mark>28032</mark> java</span>
+<span class="tok-gp">$</span> pmap <span class="tok-sb">`</span>pgrep -f HelloCDS2<span class="tok-sb">`</span> <span class="tok-p">|</span>  sed -n -e <span class="tok-s1">&#39;2p;$p&#39;</span> <i class="conum" data-value="1"></i><b>(1)</b>
+<span class="tok-go">          Address    Size   Rss   Pss Shared_Clean Shared_Dirty Private_Clean Private_Dirty Mapping</span>
+<span class="tok-go">                  4888832 <mark>28484</mark> 25572         2956            0         12376         13152 KB</span></code></pre>
+</div>
+</div>
+<div class="colist arabic">
+<table>
+<tr>
+<td><i class="conum" data-value="1"></i><b>1</b></td>
+<td>Magical <code>sed</code> command which outputs the second and the last line of its input</td>
+</tr>
+</table>
+</div>
+<div class="paragraph">
+<p>As we can see, <code>ps</code> and <code>top</code> agree on the same values for the mapped virtual memory (i.e. 4888828 KB) and the amount of memory which is really committed to RAM (i.e. the so called <em>Residetn Set Size</em> or RSS, 28032 KB). <code>pmap</code> reports slightly higher values (see <a href="#ps_vs_pmap">ps man page</a>) but is known to provide the most accurate information. Moreover, <code>pmap</code> also details the RSS into shared and private memory which will be important for our further investigations. A description of the various values reported can be found in this nice, graphical <a href="http://www.software-architect.net/blog/article/date/2015/07/03/cheat-sheet-understanding-the-pmap1-output.html">pmap cheat sheet</a> or directly from the <a href="https://www.kernel.org/doc/Documentation/filesystems/proc.txt">Linux Kernel <code>proc</code> file system documentation</a>.</p>
+</div>
+<div id="ps_vs_pmap" class="quoteblock">
+<blockquote>
+The SIZE and RSS fields don&#8217;t count some parts of a process including the page tables, kernel stack, struct thread_info, and struct task_struct.  This is usually at least 20 KiB of memory that is always resident.  SIZE is the virtual size of the process (code+data+stack).
+</blockquote>
+<div class="attribution">
+&#8212; Linux man page<br>
+<cite>ps(1)</cite>
+</div>
+</div>
+<div class="paragraph">
+<p>Now we start a second instance of our application to see how the shared memory consumption of the two processes changes:</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="pygments highlight nowrap"><code data-lang="console"><span></span><span class="tok-gp">$</span> java -Xshare:off -XX:+UnlockDiagnosticVMOptions -XX:SharedArchiveFile<span class="tok-o">=</span>/tmp/HelloCDS2.jsa -Xint io.simonis.HelloCDS2
+<span class="tok-gp">$</span> pmap <span class="tok-sb">`</span>pgrep -f HelloCDS2 <span class="tok-p">|</span> head -1<span class="tok-sb">`</span> <span class="tok-p">|</span>  sed -n -e <span class="tok-s1">&#39;2p;$p&#39;</span> <i class="conum" data-value="1"></i><b>(1)</b>
+<span class="tok-go">         Address    Size   Rss   Pss Shared_Clean Shared_Dirty Private_Clean Private_Dirty Mapping</span>
+<span class="tok-go">                 4888832 <mark>28484</mark> <mark>19396</mark>        <mark>15304</mark>            0            28         13152 KB</span>
+<span class="tok-gp">$</span> pmap <span class="tok-sb">`</span>pgrep -f HelloCDS2 <span class="tok-p">|</span> tail -1<span class="tok-sb">`</span> <span class="tok-p">|</span>  sed -n -e <span class="tok-s1">&#39;2p;$p&#39;</span> <i class="conum" data-value="2"></i><b>(2)</b>
+<span class="tok-go">         Address    Size   Rss   Pss Shared_Clean Shared_Dirty Private_Clean Private_Dirty Mapping</span>
+<span class="tok-go">                 4888832 <mark>28484</mark> <mark>19396</mark>        <mark>15304</mark>            0             0         13180 KB</span></code></pre>
+</div>
+</div>
+<div class="colist arabic">
+<table>
+<tr>
+<td><i class="conum" data-value="1"></i><b>1</b></td>
+<td>Get the <code>pmap</code> statistics of the first process one more time (assumes that PIDs are assigned incrementally)</td>
+</tr>
+<tr>
+<td><i class="conum" data-value="2"></i><b>2</b></td>
+<td>Get the <code>pmap</code> statistics of the second process (assumes that PIDs are assigned incrementally)</td>
+</tr>
+</table>
+</div>
+<div class="paragraph">
+<p>After the second instance has been started, neither the virtual nor the committed memory consumption of the first process has changed. Furthermore the second process has the exact same memory footprint like the first one. However, after the start of the second process, we can observe that the amount of shared memory of process one has increased from <code>2956 KB</code> to <code>15304 KB</code> which leads to a decrease in the process' <em>Proportional Set Size</em> (PSS) from <code>25572 KB</code> down to <code>19396 KB</code>.</p>
+</div>
+<div class="quoteblock">
+<blockquote>
+The "proportional set size" (PSS) of a process is the count of pages it has in memory, where each page is divided by the number of processes sharing it. So if a process has 1000 pages all to itself, and 1000 shared with one other process, its PSS will be 1500. Note that even a page which is part of a MAP_SHARED mapping, but has only a single pte mapped, i.e.  is currently used by only one process, is accounted as private and not as shared.
+</blockquote>
+<div class="attribution">
+&#8212; www.kernel.org<br>
+<cite>T H E  /proc   F I L E S Y S T E M</cite>
+</div>
+</div>
+<div class="paragraph">
+<p>For the Java VM, the read-only parts of the loaded shared libraries (i.e. <code>libjvm.so</code>) can be shared between all the VM instances running at the same time. This explains why, taking together, the two VM&#8217;s consume less memory (i.e. have a smaller memory footprint) than the simple sum of their single resident set sizes when running alone. Notice that even a single instance has a PSS value which is smaller than the process' RSS value, because it uses commom shared libraries (e.g. <code>libc.so</code>) which are already mapped into the memory by other processes.</p>
+</div>
+<div class="paragraph">
+<p>Now lets see how the situation changes when we use CDS:</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="pygments highlight nowrap"><code data-lang="console"><span></span><span class="tok-gp">$</span> java -Xshare:on -XX:+UnlockDiagnosticVMOptions -XX:SharedArchiveFile<span class="tok-o">=</span>/tmp/HelloCDS2.jsa -Xint io.simonis.HelloCDS2 <i class="conum" data-value="1"></i><b>(1)</b>
+<span class="tok-gp">$</span> pmap <span class="tok-sb">`</span>pgrep -f HelloCDS2<span class="tok-sb">`</span> <span class="tok-p">|</span> sed -n -e <span class="tok-s1">&#39;2p;$p&#39;</span>
+<span class="tok-go">         Address    Size   Rss   Pss Shared_Clean Shared_Dirty Private_Clean Private_Dirty Mapping</span>
+<span class="tok-go">                 4896596 <mark>32888</mark> <mark>29991</mark>         2928            0         18632         11328 KB</span>
+<span class="tok-gp">$</span> java -Xshare:on -XX:+UnlockDiagnosticVMOptions -XX:SharedArchiveFile<span class="tok-o">=</span>/tmp/HelloCDS2.jsa -Xint io.simonis.HelloCDS2 <i class="conum" data-value="2"></i><b>(2)</b>
+<span class="tok-gp">$</span> pmap <span class="tok-sb">`</span>pgrep -f HelloCDS2 <span class="tok-p">|</span> head -1<span class="tok-sb">`</span> <span class="tok-p">|</span>  sed -n -e <span class="tok-s1">&#39;2p;$p&#39;</span> <i class="conum" data-value="3"></i><b>(3)</b>
+<span class="tok-go">         Address    Size   Rss   Pss Shared_Clean Shared_Dirty Private_Clean Private_Dirty Mapping</span>
+<span class="tok-go">                 4896596 <mark>32888</mark> <mark>20672</mark>        21560            0            32         11296 KB </span><i class="conum" data-value="5"></i><b>(5)</b>
+<span class="tok-gp">$</span> pmap <span class="tok-sb">`</span>pgrep -f HelloCDS2 <span class="tok-p">|</span> tail -1<span class="tok-sb">`</span> <span class="tok-p">|</span>  sed -n -e <span class="tok-s1">&#39;2p;$p&#39;</span> <i class="conum" data-value="4"></i><b>(4)</b>
+<span class="tok-go">         Address    Size   Rss   Pss Shared_Clean Shared_Dirty Private_Clean Private_Dirty Mapping</span>
+<span class="tok-go">                 4896596 <mark>32888</mark> <mark>20672</mark>        21560            0            28         11300 KB </span><i class="conum" data-value="6"></i><b>(6)</b>
+<span class="tok-gp">$</span> <span class="tok-nb">kill</span> <span class="tok-sb">`</span>pgrep -f HelloCDS2 <span class="tok-p">|</span> tail -1<span class="tok-sb">`</span> <i class="conum" data-value="7"></i><b>(7)</b>
+<span class="tok-gp">$</span> pmap <span class="tok-sb">`</span>pgrep -f HelloCDS2<span class="tok-sb">`</span> <span class="tok-p">|</span>  sed -n -e <span class="tok-s1">&#39;2p;$p&#39;</span>
+<span class="tok-go">         Address    Size   Rss   Pss Shared_Clean Shared_Dirty Private_Clean Private_Dirty Mapping</span>
+<span class="tok-go">                 4896596 32888 29991         2928            0         18664         11296 KB </span><i class="conum" data-value="8"></i><b>(8)</b></code></pre>
+</div>
+</div>
+<div class="colist arabic">
+<table>
+<tr>
+<td><i class="conum" data-value="1"></i><b>1</b></td>
+<td>Turn on Class Data Sharing (i.e. <code>-Xshare:on</code>)</td>
+</tr>
+<tr>
+<td><i class="conum" data-value="2"></i><b>2</b></td>
+<td>Now start a second instance of <code>io.simonis.HelloCDS2</code></td>
+</tr>
+<tr>
+<td><i class="conum" data-value="3"></i><b>3</b></td>
+<td>Get the <code>pmap</code> statistics of the first process one more time</td>
+</tr>
+<tr>
+<td><i class="conum" data-value="4"></i><b>4</b></td>
+<td>Get the <code>pmap</code> statistics of the second process</td>
+</tr>
+<tr>
+<td><i class="conum" data-value="5"></i><b>5</b></td>
+<td>The <code>Size</code>/<code>RSS</code> values are still the same, but the amount of shared memory increases from <code>2928 KB</code> to <code>21560 KB</code></td>
+</tr>
+<tr>
+<td><i class="conum" data-value="6"></i><b>6</b></td>
+<td>The <code>Size</code>/<code>RSS</code> values of the second process are exactly the same like for the first process</td>
+</tr>
+<tr>
+<td><i class="conum" data-value="7"></i><b>7</b></td>
+<td>Kill the second process..</td>
+</tr>
+<tr>
+<td><i class="conum" data-value="8"></i><b>8</b></td>
+<td>..and run <code>pmap</code> on the first process one more time (the amount of shared memory drops back to <code>2928 KB</code>)</td>
+</tr>
+</table>
+</div>
+<div class="paragraph">
+<p>The first thing we notice is that both, the RSS (32888 vs. 28484 KB) and the PSS (29991 vs. 25572 KB) values are slightly higher compared to the non-CDS case. On the other hand, the PSS value drops more significantly (from 29991 to 20672 vs. from 25572 to 19396) in the CDS case after we start the second VM. The first observation can be explained by looking at the output of the <code>-Xlog:gc+heap+exit</code> output which prints some Heap and Metaspace statistics at VM exit:</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="pygments highlight nowrap"><code data-lang="console"><span></span><span class="tok-gp">$</span> java -Xlog:gc+heap+exit -Xshare:off -XX:+UnlockDiagnosticVMOptions -XX:SharedArchiveFile<span class="tok-o">=</span>/tmp/HelloCDS2.jsa -Xint io.simonis.HelloCDS2
+<span class="tok-go">Hello CDS</span>
+
+<span class="tok-go">[735,797s][info][gc,heap,exit] Heap</span>
+<span class="tok-go">[735,797s][info][gc,heap,exit]  garbage-first heap   total <mark>8192K</mark>, used 531K [0x0000000083200000, 0x0000000100000000)</span>
+<span class="tok-go">[735,798s][info][gc,heap,exit]   region size 1024K, 1 young (1024K), 0 survivors (0K)</span>
+<span class="tok-go">[735,798s][info][gc,heap,exit]  Metaspace       used <mark>3550K</mark>, capacity 4486K, committed <mark>4864K</mark>, reserved 1056768K</span>
+<span class="tok-go">[735,798s][info][gc,heap,exit]   class space    used <mark>312K</mark>, capacity 386K, committed <mark>512K</mark>, reserved 1048576K</span>
+
+<span class="tok-gp">$</span> java -Xlog:gc+heap+exit -Xshare:on  -XX:+UnlockDiagnosticVMOptions -XX:SharedArchiveFile<span class="tok-o">=</span>/tmp/HelloCDS2.jsa -Xint io.simonis.HelloCDS2
+<span class="tok-go">Hello CDS</span>
+
+<span class="tok-go">[288,178s][info][gc,heap,exit] Heap</span>
+<span class="tok-go">[288,179s][info][gc,heap,exit]  garbage-first heap   total <mark>10240K</mark>, used 625K [0x0000000083200000, 0x0000000100000000)</span>
+<span class="tok-go">[288,179s][info][gc,heap,exit]   region size 1024K, 1 young (1024K), 0 survivors (0K)</span>
+<span class="tok-go">[288,179s][info][gc,heap,exit]  Metaspace       used <mark>4K</mark>, capacity 4486K, committed <mark>4864K</mark>, reserved 1056768K</span>
+<span class="tok-go">[288,179s][info][gc,heap,exit]   class space    used <mark>3K</mark>, capacity 386K, committed <mark>512K</mark>, reserved 1048576K</span></code></pre>
+</div>
+</div>
+<div class="paragraph">
+<p>We see that the Java heap usage is about 2 MB higher with CDS (10240 vs. 8192K KB). We also see that in the CDS case we only use 4 KB Meta- and 3 KB Classspace (compared to 3550 and 312 KB in the non-CDS case) because with CDS the classes are used directly from the CDS archive. Unfortunately, the VM still commits the exact same, minimal amount of Meta- and Classspace (4864 and 512 KB).</p>
+</div>
+<div class="paragraph">
+<p>This observation can be confirmed by looking at the output of the <code>VM.native_memory</code> diagnostic command which details the various native memory consumers from within the VM if the VM was started with the <code>-XX:NativeMemoryTracking=summary</code> option:</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre></pre>
+</div>
+</div>
+</div>
+<div class="sect2">
+<h3 id="_cds_summary">CDS summary</h3>
+<div class="paragraph">
+<p>Finally, it should be mentioned that the each of the various <code>-Xshare</code> options there exists a corresponding extended <code>-XX:</code> option as indicated in the following table:</p>
+</div>
+<table class="tableblock frame-all grid-all spread">
+<colgroup>
+<col style="width: 50%;">
+<col style="width: 50%;">
+</colgroup>
+<thead>
+<tr>
+<th class="tableblock halign-left valign-top">Short Form</th>
+<th class="tableblock halign-left valign-top">Long Form</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><code>-Xshare:dump</code></p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><code>-XX:+DumpSharedSpaces</code> (implies <code>-Xint</code>)</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><code>-Xshare:on</code></p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><code>-XX:+UseSharedSpaces</code> <code>-XX:+RequireSharedSpaces</code></p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><code>-Xshare:auto</code></p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><code>-XX:+UseSharedSpaces</code> <code>-XX:-RequireSharedSpaces</code></p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><code>-Xshare:off</code></p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><code>-XX:-UseSharedSpaces</code> <code>-XX:-RequireSharedSpaces</code></p></td>
+</tr>
+</tbody>
+</table>
+<div class="sect3">
+<h4 id="_colophon">Colophon</h4>
+<div class="paragraph">
+<p>Rendered with AsciiDoctor version 1.5.6.1</p>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+<div id="footer">
+<div id="footer-text">
+Last updated 2018-01-08 00:40:04 CET
+</div>
+</div>
+</body>
+</html>

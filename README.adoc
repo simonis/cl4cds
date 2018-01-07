@@ -57,7 +57,11 @@ io.simonis.cl4cds [<class-trace-file> [<class-list-file>]]
        classes from .jar files but may change eventually (defaults to 'false')
 ----
 
-If you're interested in the current limitations of CDS/AppCDS, their implementation details and performance and memory consumption gains achievable by CDS/AppCDS please read on or visit my talk about https://fosdem.org/2018/schedule/event/class_data_sharing[Class Data Sharing at FOSDEM 2018].
+If you're interested in the implementation details of CDS/AppCDS, their current limitations and their performance and memory characteristics please read on
+ifdef::env-github[the extended version of this article at https://simonis.github.io/cl4cds]
+or visit my talk about https://fosdem.org/2018/schedule/event/class_data_sharing[Class Data Sharing at FOSDEM 2018].
+
+ifndef::env-github[]
 
 WARNING: the following is work in progress!
 
@@ -638,3 +642,4 @@ http://mail.openjdk.java.net/pipermail/hotspot-dev/2017-March/thread.html#26063
 <!--  LocalWords:  UseSharedSpaces RequireSharedSpaces
  -->
 ////
+endif::[]
