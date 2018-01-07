@@ -299,7 +299,11 @@ $ pmap `pgrep -f HelloCDS2` |  sed -n -e '2p;$p' <1>
 ----
 <1> Magical `sed` command which outputs the second and the last line of its input
 
-As we can see, `ps` and `top` agree on the same values for the mapped virtual memory (i.e. 4888828 KB) and the amount of memory which is really committed to RAM (i.e. the so called _Residetn Set Size_ or RSS, 28032 KB). `pmap` reports slightly higher values but is known to provide the most accurate information. Moreover, `pmap` also details the RSS into shared and private memory which will be important for our further investigations. A description of the various values reported can be found in this nice, graphical http://www.software-architect.net/blog/article/date/2015/07/03/cheat-sheet-understanding-the-pmap1-output.html[pmap cheat sheet] or directly from the https://www.kernel.org/doc/Documentation/filesystems/proc.txt[Linux Kernel `proc` file system documentation].
+As we can see, `ps` and `top` agree on the same values for the mapped virtual memory (i.e. 4888828 KB) and the amount of memory which is really committed to RAM (i.e. the so called _Residetn Set Size_ or RSS, 28032 KB). `pmap` reports slightly higher values (see <<ps_vs_pmap, ps man page>>) but is known to provide the most accurate information. Moreover, `pmap` also details the RSS into shared and private memory which will be important for our further investigations. A description of the various values reported can be found in this nice, graphical http://www.software-architect.net/blog/article/date/2015/07/03/cheat-sheet-understanding-the-pmap1-output.html[pmap cheat sheet] or directly from the https://www.kernel.org/doc/Documentation/filesystems/proc.txt[Linux Kernel `proc` file system documentation].
+
+[[ps_vs_pmap]]
+[quote, Linux man page, ps(1)]
+The SIZE and RSS fields don't count some parts of a process including the page tables, kernel stack, struct thread_info, and struct task_struct.  This is usually at least 20 KiB of memory that is always resident.  SIZE is the virtual size of the process (code+data+stack).
 
 Now we start a second instance of our application to see how the shared memory consumption of the two processes changes:
 
@@ -321,25 +325,25 @@ After the second instance has been started, neither the virtual nor the committe
 [quote, www.kernel.org, T H E  /proc   F I L E S Y S T E M]
 The "proportional set size" (PSS) of a process is the count of pages it has in memory, where each page is divided by the number of processes sharing it. So if a process has 1000 pages all to itself, and 1000 shared with one other process, its PSS will be 1500. Note that even a page which is part of a MAP_SHARED mapping, but has only a single pte mapped, i.e.  is currently used by only one process, is accounted as private and not as shared.
 
-For the Java VM, all the read-only parts of the loaded shared libraries (i.e. `libjvm.so`) can be shared between all the VM instances running at the same time. This explains why taking together, the two VM's consume less memory (i.e. have a smaller memory footprint) than the simple sum of their single resident set sizes. Notice that already the first instance had a PSS value which was smaller than the process' RSS value, because it used parts of libraries (i.e. `libc.so`) which were already mapped into the memory by other processes.
+For the Java VM, the read-only parts of the loaded shared libraries (i.e. `libjvm.so`) can be shared between all the VM instances running at the same time. This explains why, taking together, the two VM's consume less memory (i.e. have a smaller memory footprint) than the simple sum of their single resident set sizes when running alone. Notice that even a single instance has a PSS value which is smaller than the process' RSS value, because it uses commom shared libraries (e.g. `libc.so`) which are already mapped into the memory by other processes.
 
-Now lets what happens when we we use CDS:
+Now lets see how the situation changes when we use CDS:
 
-[source, console ,options="nowrap"]
+[source, console ,options="nowrap", subs="+macros"]
 ----
 $ java -Xshare:on -XX:+UnlockDiagnosticVMOptions -XX:SharedArchiveFile=/tmp/HelloCDS2.jsa -Xint io.simonis.HelloCDS2 <1>
 $ pmap `pgrep -f HelloCDS2` | sed -n -e '2p;$p'
          Address    Size   Rss   Pss Shared_Clean Shared_Dirty Private_Clean Private_Dirty Mapping
-                 4896596 32888 29991         2928            0         18632         11328 KB
+                 4896596 +++<mark>32888</mark>+++ +++<mark>29991</mark>+++         2928            0         18632         11328 KB
 $ java -Xshare:on -XX:+UnlockDiagnosticVMOptions -XX:SharedArchiveFile=/tmp/HelloCDS2.jsa -Xint io.simonis.HelloCDS2 <2>
 $ pmap `pgrep -f HelloCDS2 | head -1` |  sed -n -e '2p;$p' <3>
          Address    Size   Rss   Pss Shared_Clean Shared_Dirty Private_Clean Private_Dirty Mapping
-                 4896596 32888 20672        21560            0            32         11296 KB <5>
+                 4896596 +++<mark>32888</mark>+++ +++<mark>20672</mark>+++        21560            0            32         11296 KB <5>
 $ pmap `pgrep -f HelloCDS2 | tail -1` |  sed -n -e '2p;$p' <4>
          Address    Size   Rss   Pss Shared_Clean Shared_Dirty Private_Clean Private_Dirty Mapping
-                 4896596 32888 20672        21560            0            28         11300 KB <6>
+                 4896596 +++<mark>32888</mark>+++ +++<mark>20672</mark>+++        21560            0            28         11300 KB <6>
 $ kill `pgrep -f HelloCDS2 | tail -1` <7>
-$ pmap --read-rc-from=/tmp/pmap.rc `pgrep -f HelloCDS2` |  sed -n -e '2p;$p'
+$ pmap `pgrep -f HelloCDS2` |  sed -n -e '2p;$p'
          Address    Size   Rss   Pss Shared_Clean Shared_Dirty Private_Clean Private_Dirty Mapping
                  4896596 32888 29991         2928            0         18664         11296 KB <8>
 ----
@@ -351,6 +355,61 @@ $ pmap --read-rc-from=/tmp/pmap.rc `pgrep -f HelloCDS2` |  sed -n -e '2p;$p'
 <6> The `Size`/`RSS` values of the second process are exactly the same like for the first process
 <7> Kill the second process..
 <8> ..and run `pmap` on the first process one more time (the amount of shared memory drops back to `2928 KB`)
+
+The first thing we notice is that both, the RSS (32888 vs. 28484 KB) and the PSS (29991 vs. 25572 KB) values are slightly higher compared to the non-CDS case. On the other hand, the PSS value drops more significantly (from 29991 to 20672 vs. from 25572 to 19396) in the CDS case after we start the second VM. The first observation can be explained by looking at the output of the `-Xlog:gc+heap+exit` output which prints some Heap and Metaspace statistics at VM exit:
+
+[source, console ,options="nowrap", subs="+macros"]
+----
+$ java -Xlog:gc+heap+exit -Xshare:off -XX:+UnlockDiagnosticVMOptions -XX:SharedArchiveFile=/tmp/HelloCDS2.jsa -Xint io.simonis.HelloCDS2
+Hello CDS
+
+[735,797s][info][gc,heap,exit] Heap
+[735,797s][info][gc,heap,exit]  garbage-first heap   total +++<mark>8192K</mark>+++, used 531K [0x0000000083200000, 0x0000000100000000)
+[735,798s][info][gc,heap,exit]   region size 1024K, 1 young (1024K), 0 survivors (0K)
+[735,798s][info][gc,heap,exit]  Metaspace       used +++<mark>3550K</mark>+++, capacity 4486K, committed +++<mark>4864K</mark>+++, reserved 1056768K
+[735,798s][info][gc,heap,exit]   class space    used +++<mark>312K</mark>+++, capacity 386K, committed +++<mark>512K</mark>+++, reserved 1048576K
+
+$ java -Xlog:gc+heap+exit -Xshare:on  -XX:+UnlockDiagnosticVMOptions -XX:SharedArchiveFile=/tmp/HelloCDS2.jsa -Xint io.simonis.HelloCDS2
+Hello CDS
+
+[288,178s][info][gc,heap,exit] Heap
+[288,179s][info][gc,heap,exit]  garbage-first heap   total +++<mark>10240K</mark>+++, used 625K [0x0000000083200000, 0x0000000100000000)
+[288,179s][info][gc,heap,exit]   region size 1024K, 1 young (1024K), 0 survivors (0K)
+[288,179s][info][gc,heap,exit]  Metaspace       used +++<mark>4K</mark>+++, capacity 4486K, committed +++<mark>4864K</mark>+++, reserved 1056768K
+[288,179s][info][gc,heap,exit]   class space    used +++<mark>3K</mark>+++, capacity 386K, committed +++<mark>512K</mark>+++, reserved 1048576K
+----
+
+We see that the Java heap usage is about 2 MB higher with CDS (10240 vs. 8192K KB). We also see that in the CDS case we only use 4 KB Meta- and 3 KB Classspace (compared to 3550 and 312 KB in the non-CDS case) because with CDS the classes are used directly from the CDS archive. Unfortunately, the VM still commits the exact same, minimal amount of Meta- and Classspace (4864 and 512 KB).
+
+This observation can be confirmed by looking at the output of the `VM.native_memory` diagnostic command which details the various native memory consumers from within the VM if the VM was started with the `-XX:NativeMemoryTracking=summary` option:
+
+----
+
+----
+
+////
+Why does a JVM report more committed memory than the linux process resident set size?
+https://stackoverflow.com/questions/31173374/why-does-a-jvm-report-more-committed-memory-than-the-linux-process-resident-set
+
+Difference between Resident Set Size (RSS) and Java total committed memory (NMT) for a JVM running in Docker container
+https://stackoverflow.com/questions/38597965/difference-between-resident-set-size-rss-and-java-total-committed-memory-nmt
+
+Analyzing java memory usage in a Docker container
+http://trustmeiamadeveloper.com/2016/03/18/where-is-my-memory-java/
+
+Decommit unused virtual memory unless overcommit is enabled #255
+https://github.com/jemalloc/jemalloc/issues/255
+
+1.6. Add MADV_FREE flag to madvise(2)
+https://kernelnewbies.org/Linux_4.5#Add_MADV_FREE_flag_to_madvise.282.29
+
+Volatile ranges and MADV_FREE
+https://lwn.net/Articles/590991/
+
+Is it possible to “punch holes” through mmap'ed anonymous memory?
+https://stackoverflow.com/questions/21722545/is-it-possible-to-punch-holes-through-mmaped-anonymous-memory
+////
+
 
 ////
 simonis@simonis:/tmp$ pmap --read-rc-from=/tmp/pmap.rc `pgrep -f HelloCDS2 | head -1` |  egrep "(Mapping|KB|.jsa)"
