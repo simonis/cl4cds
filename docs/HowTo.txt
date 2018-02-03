@@ -1,2 +1,3 @@
+export PATH=/opt/rubies/ruby-2.5.0/bin:$PATH
 From the top-level directory do:
 asciidoctor -a linkcss -a stylesheet=riak.css -a stylesdir=./styles -a pygments-style=manni -a copycss=/share/Git/asciidoctor-stylesheet-factory/stylesheets/riak.css --destination-dir docs/ --out-file=index.html README.adoc

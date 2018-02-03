@@ -12,13 +12,13 @@
 </head>
 <body class="article">
 <div id="header">
-<h1>cl4cds</h1>
+<h1><a href="https://github.com/simonis/cl4cds">cl4cds</a></h1>
 </div>
 <div id="content">
 <div id="preamble">
 <div class="sectionbody">
 <div class="paragraph">
-<p><code>cl4cds</code> is a little tool which helps exploring the new Application Class Data Sharing (AppCDS) feature in OpenJDK 10. AppCDS allows sharing of application classes even if they get loaded by a custom class loaders, but unfortunately there&#8217;s currently no default tooling available to make this feature accessible to end users. That&#8217;s where <code>cl4cds</code> (which is an acronym for "class list for class data sharing") kicks in. It converts a class list obtained from running your application with <code>Xlog:class+load</code> to a format which can be passed to the VM as a parameter of the <code>-XX:SharedClassListFile=</code> option. This article documents the <code>cl4cds</code> tool but at the same time also describes the implementation and the benefits of the ovarall CDS/AppCDS features.</p>
+<p><code>cl4cds</code> (<a href="https://github.com/simonis/cl4cds" class="bare">https://github.com/simonis/cl4cds</a>) is a little tool which helps exploring the new Application Class Data Sharing (AppCDS) feature in OpenJDK 10. AppCDS allows sharing of application classes even if they get loaded by a custom class loaders, but unfortunately there&#8217;s currently no default tooling available to make this feature accessible to end users. That&#8217;s where <code>cl4cds</code> (which is an acronym for "class list for class data sharing") kicks in. It converts a class list obtained from running your application with <code>Xlog:class+load=debug</code> to a format which can be passed to the VM as a parameter of the <code>-XX:SharedClassListFile=</code> option. This article documents the <code>cl4cds</code> tool but at the same time also describes the implementation and the benefits of the ovarall CDS/AppCDS features.</p>
 </div>
 </div>
 </div>
@@ -31,7 +31,7 @@
 <div class="listingblock">
 <div class="content">
 <pre class="pygments highlight nowrap"><code data-lang="console"><span></span><span class="tok-gp">$</span> <span class="tok-nb">export</span> <span class="tok-nv">JAVA_HOME</span><span class="tok-o">=</span>JAVA_10_HOME <i class="conum" data-value="1"></i><b>(1)</b>
-<span class="tok-gp">$</span> <span class="tok-nb">export</span> <span class="tok-nv">CATALINA_OPTS</span><span class="tok-o">=</span>-Xlog:class+load:file<span class="tok-o">=</span>/tmp/tomcat.classtrace <i class="conum" data-value="2"></i><b>(2)</b>
+<span class="tok-gp">$</span> <span class="tok-nb">export</span> <span class="tok-nv">CATALINA_OPTS</span><span class="tok-o">=</span>-Xlog:class+load<span class="tok-o">=</span>debug:file<span class="tok-o">=</span>/tmp/tomcat.classtrace <i class="conum" data-value="2"></i><b>(2)</b>
 <span class="tok-gp">$</span> CATALINA_HOME/bin/catalina.sh start <i class="conum" data-value="3"></i><b>(3)</b>
 <span class="tok-gp">$</span> CATALINA_HOME/bin/catalina.sh stop <i class="conum" data-value="4"></i><b>(4)</b>
 <span class="tok-gp">$</span> JAVA_10_HOME/bin/java io.simonis.cl4cds /tmp/tomcat.classtrace /tmp/tomcat.cls
@@ -82,9 +82,9 @@
 </div>
 <div class="listingblock">
 <div class="content">
-<pre>io.simonis.cl4cds [&lt;class-trace-file&gt; [&lt;class-list-file&gt;]]
+<pre class="pygments highlight nowrap"><code>io.simonis.cl4cds [&lt;class-trace-file&gt; [&lt;class-list-file&gt;]]
 
-  &lt;class-trace-file&gt;: class trace output obtained by running -Xlog:class+load
+  &lt;class-trace-file&gt;: class trace obtained by running -Xlog:class+load=debug
                       if not specified read from &lt;stdin&gt;
   &lt;class-list-file&gt; : class list which can be passed to -XX:SharedClassListFile
                       if not specified written to &lt;stdout&gt;
@@ -95,7 +95,7 @@
     -Dio.simonis.cl4cds.dumpFromClassFile=true :
        Include classes into the output which are loaded from plain classfiles.
        This is currently not supported by OpenJDK 10 which can only dump
-       classes from .jar files but may change eventually (defaults to 'false')</pre>
+       classes from .jar files but may change eventually (defaults to 'false')</code></pre>
 </div>
 </div>
 <div class="paragraph">
@@ -627,7 +627,7 @@ The "proportional set size" (PSS) of a process is the count of pages it has in m
 </div>
 <div id="footer">
 <div id="footer-text">
-Last updated 2018-01-08 00:40:04 CET
+Last updated 2018-01-09 18:11:21 CET
 </div>
 </div>
 </body>

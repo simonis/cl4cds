@@ -1,4 +1,4 @@
-= cl4cds
+= https://github.com/simonis/cl4cds[cl4cds]
 :toc:
 :toc-placement!:
 :source-highlighter: pygments
@@ -11,16 +11,16 @@ ifdef::env-github[]
 :warning-caption: :warning:
 endif::[]
 
-`cl4cds` is a little tool which helps exploring the new Application Class Data Sharing (AppCDS) feature in OpenJDK 10. AppCDS allows sharing of application classes even if they get loaded by a custom class loaders, but unfortunately there's currently no default tooling available to make this feature accessible to end users. That's where `cl4cds` (which is an acronym for "class list for class data sharing") kicks in. It converts a class list obtained from running your application with `Xlog:class+load` to a format which can be passed to the VM as a parameter of the `-XX:SharedClassListFile=` option. This article documents the `cl4cds` tool but at the same time also describes the implementation and the benefits of the ovarall CDS/AppCDS features.
+`cl4cds` (https://github.com/simonis/cl4cds) is a little tool which helps exploring the new Application Class Data Sharing (AppCDS) feature in OpenJDK 10. AppCDS allows sharing of application classes even if they get loaded by a custom class loaders, but unfortunately there's currently no default tooling available to make this feature accessible to end users. That's where `cl4cds` (which is an acronym for "class list for class data sharing") kicks in. It converts a class list obtained from running your application with `Xlog:class+load=debug` to a format which can be passed to the VM as a parameter of the `-XX:SharedClassListFile=` option. This article documents the `cl4cds` tool but at the same time also describes the implementation and the benefits of the ovarall CDS/AppCDS features.
 
 == TL;DR
 
 If you're only interested in the `cl4cds` utility, you can use it as follows (tested with http://openjdk.java.net/projects/jdk/10/[OpenJDK 10] and https://tomcat.apache.org/download-90.cgi[Tomcat 9]):
 
-[source, console ,options="nowrap"]
+[source, console, options="nowrap"]
 ----
 $ export JAVA_HOME=JAVA_10_HOME # <1>
-$ export CATALINA_OPTS=-Xlog:class+load:file=/tmp/tomcat.classtrace # <2>
+$ export CATALINA_OPTS=-Xlog:class+load=debug:file=/tmp/tomcat.classtrace # <2>
 $ CATALINA_HOME/bin/catalina.sh start // <3>
 $ CATALINA_HOME/bin/catalina.sh stop // <4>
 $ JAVA_10_HOME/bin/java io.simonis.cl4cds /tmp/tomcat.classtrace /tmp/tomcat.cls
@@ -40,10 +40,11 @@ $ CATALINA_HOME/bin/catalina.sh start <8>
 
 The current `cl4cds` command line options are as follows:
 
+[source, options="nowrap"]
 ----
 io.simonis.cl4cds [<class-trace-file> [<class-list-file>]]
 
-  <class-trace-file>: class trace output obtained by running -Xlog:class+load
+  <class-trace-file>: class trace obtained by running -Xlog:class+load=debug
                       if not specified read from <stdin>
   <class-list-file> : class list which can be passed to -XX:SharedClassListFile
                       if not specified written to <stdout>
@@ -412,6 +413,13 @@ https://lwn.net/Articles/590991/
 
 Is it possible to “punch holes” through mmap'ed anonymous memory?
 https://stackoverflow.com/questions/21722545/is-it-possible-to-punch-holes-through-mmaped-anonymous-memory
+
+Chapter 3  Page Table Management
+https://www.kernel.org/doc/gorman/html/understand/understand006.html
+
+/proc/[pid]/pagemap
+
+https://stackoverflow.com/questions/5748492/is-there-any-api-for-determining-the-physical-address-from-virtual-address-in-li
 ////
 
 
@@ -520,6 +528,12 @@ pmap --read-rc-from=/tmp/pmap.rc `pgrep -f HelloCDS2`
 
 ////
 
+////
+Tomcat:
+
+more reproducible, faster startup-times: -Djava.security.egd=file:/dev/./urandom
+////
+
 === CDS summary
 
 Finally, it should be mentioned that the each of the various `-Xshare` options there exists a corresponding extended `-XX:` option as indicated in the following table:
@@ -535,6 +549,8 @@ Finally, it should be mentioned that the each of the various `-Xshare` options t
 
 | `-Xshare:off` | `-XX:-UseSharedSpaces` `-XX:-RequireSharedSpaces`
 |===
+
+endif::[]
 
 [colophon]
 ==== Colophon
@@ -642,4 +658,3 @@ http://mail.openjdk.java.net/pipermail/hotspot-dev/2017-March/thread.html#26063
 <!--  LocalWords:  UseSharedSpaces RequireSharedSpaces
  -->
 ////
-endif::[]
