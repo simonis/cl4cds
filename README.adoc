@@ -60,7 +60,7 @@ io.simonis.cl4cds [<class-trace-file> [<class-list-file>]]
 
 If you're interested in the implementation details of CDS/AppCDS, their current limitations and their performance and memory characteristics please read on
 ifdef::env-github[the extended version of this article at https://simonis.github.io/cl4cds]
-or visit my talk about https://fosdem.org/2018/schedule/event/class_data_sharing[Class Data Sharing at FOSDEM 2018].
+or watch my talk about Class Data Sharing (https://video.fosdem.org/2018/UD2.208/class_data_sharing.mp4[mp4], https://video.fosdem.org/2018/UD2.208/class_data_sharing.webm[WebM/VP9], https://www.youtube.com/watch?v=erK5r8xpoAQ[YouTube]) in the https://fosdem.org/2018/schedule/event/class_data_sharing[Free Java DevRoom] at FOSDEM 2018.
 
 ifndef::env-github[]
 

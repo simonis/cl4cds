@@ -18,7 +18,7 @@
 <div id="preamble">
 <div class="sectionbody">
 <div class="paragraph">
-<p><code>cl4cds</code> (<a href="https://github.com/simonis/cl4cds" class="bare">https://github.com/simonis/cl4cds</a>) is a little tool which helps exploring the new Application Class Data Sharing (AppCDS) feature in OpenJDK 10. AppCDS allows sharing of application classes even if they get loaded by a custom class loaders, but unfortunately there&#8217;s currently no default tooling available to make this feature accessible to end users. That&#8217;s where <code>cl4cds</code> (which is an acronym for "class list for class data sharing") kicks in. It converts a class list obtained from running your application with <code>Xlog:class+load=debug</code> to a format which can be passed to the VM as a parameter of the <code>-XX:SharedClassListFile=</code> option. This article documents the <code>cl4cds</code> tool but at the same time also describes the implementation and the benefits of the ovarall CDS/AppCDS features.</p>
+<p><code>cl4cds</code> (<a href="https://github.com/simonis/cl4cds" class="bare">https://github.com/simonis/cl4cds</a>) is a little tool which helps exploring the new Application Class Data Sharing (AppCDS) feature in OpenJDK 10. AppCDS allows sharing of application classes even if they get loaded by a custom class loaders, but unfortunately there&#8217;s currently no default tooling available to make this feature accessible to end users. That&#8217;s where <code>cl4cds</code> (which is an acronym for "class list for class data sharing") kicks in. It converts a class list obtained from running your application with <code>-Xlog:class+load=debug</code> to a format which can be passed to the VM as a parameter of the <code>-XX:SharedClassListFile=</code> option. This article documents the <code>cl4cds</code> tool but at the same time also describes the implementation and the benefits of the ovarall CDS/AppCDS features.</p>
 </div>
 </div>
 </div>
@@ -100,7 +100,7 @@
 </div>
 <div class="paragraph">
 <p>If you&#8217;re interested in the implementation details of CDS/AppCDS, their current limitations and their performance and memory characteristics please read on
-or visit my talk about <a href="https://fosdem.org/2018/schedule/event/class_data_sharing">Class Data Sharing at FOSDEM 2018</a>.</p>
+or watch my talk about Class Data Sharing (<a href="https://video.fosdem.org/2018/UD2.208/class_data_sharing.mp4">mp4</a>, <a href="https://video.fosdem.org/2018/UD2.208/class_data_sharing.webm">WebM/VP9</a>, <a href="https://www.youtube.com/watch?v=erK5r8xpoAQ">YouTube</a>) in the <a href="https://fosdem.org/2018/schedule/event/class_data_sharing">Free Java DevRoom</a> at FOSDEM 2018.</p>
 </div>
 <div class="admonitionblock warning">
 <table>
@@ -627,7 +627,7 @@ The "proportional set size" (PSS) of a process is the count of pages it has in m
 </div>
 <div id="footer">
 <div id="footer-text">
-Last updated 2018-01-09 18:11:21 CET
+Last updated 2018-02-21 17:35:58 CET
 </div>
 </div>
 </body>
