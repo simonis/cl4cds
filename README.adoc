@@ -11,7 +11,7 @@ ifdef::env-github[]
 :warning-caption: :warning:
 endif::[]
 
-`cl4cds` (https://github.com/simonis/cl4cds) is a little tool which helps exploring the new Application Class Data Sharing (AppCDS) feature in OpenJDK 10. AppCDS allows sharing of application classes even if they get loaded by a custom class loaders, but unfortunately there's currently no default tooling available to make this feature accessible to end users. That's where `cl4cds` (which is an acronym for "class list for class data sharing") kicks in. It converts a class list obtained from running your application with `Xlog:class+load=debug` to a format which can be passed to the VM as a parameter of the `-XX:SharedClassListFile=` option. This article documents the `cl4cds` tool but at the same time also describes the implementation and the benefits of the ovarall CDS/AppCDS features.
+`cl4cds` (https://github.com/simonis/cl4cds) is a little tool which helps exploring the new Application Class Data Sharing (AppCDS) feature in OpenJDK 10. AppCDS allows sharing of application classes even if they get loaded by a custom class loaders, but unfortunately there's currently no default tooling available to make this feature accessible to end users. That's where `cl4cds` (which is an acronym for "class list for class data sharing") kicks in. It converts a class list obtained from running your application with `-Xlog:class+load=debug` to a format which can be passed to the VM as a parameter of the `-XX:SharedClassListFile=` option. This article documents the `cl4cds` tool but at the same time also describes the implementation and the benefits of the ovarall CDS/AppCDS features.
 
 == TL;DR
 
