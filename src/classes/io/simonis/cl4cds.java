@@ -41,6 +41,7 @@ import java.util.HashSet;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.Scanner;
 import java.util.Set;
 import java.util.jar.JarFile;
 import java.util.regex.MatchResult;
@@ -56,6 +57,7 @@ public class cl4cds {
 
   private static final boolean DBG = Boolean.getBoolean("io.simonis.cl4cds.debug");
   private static final boolean DumpFromClassFiles = Boolean.getBoolean("io.simonis.cl4cds.dumpFromClassFile");
+  private static final boolean CompactIDs = Boolean.parseBoolean(System.getProperty("io.simonis.cl4cds.compactIDs", "true"));
   
   private enum Status {
     OK, ERROR, PRE_15, LOAD_ERROR, ZIP_ERROR, JAR_ERROR
@@ -118,6 +120,7 @@ public class cl4cds {
     Matcher secondLine = secondLineP.matcher("");
     try (in) {
       String line;
+      long objectID = 0;
       Set<String> klassSet = new HashSet<>();
       Map<String, String> nameSourceMap = new HashMap<>();
       while((line = in.readLine()) != null) {
@@ -137,6 +140,25 @@ public class cl4cds {
             String parent = mr2.group(2);
             String interf = mr2.group(3);
             String loader = mr2.group(4);
+
+            if (CompactIDs && "java.lang.Object".equals(name)) {
+              if (objectID != 0) {
+                System.err.println("java.lang.Object can't be loaded twice");
+                System.exit(-1);
+              }
+              objectID = Long.parseUnsignedLong(klass.substring(2), 16) - 1;
+              if (DBG) {
+                System.err.println("java.lang.Objekt klass = " + klass + " (" + objectID +")");
+              }
+            }
+
+            if (CompactIDs) {
+              klass = compact(klass, objectID);
+              parent = compact(parent, objectID);
+              if (interf != null) {
+                interf = compact(interf, objectID);
+              }
+            }
 
             if ("NULL class loader".equals(loader) ||
                 loader.contains("jdk/internal/loader/ClassLoaders$PlatformClassLoader" /* && source == jrt image */) ||
@@ -262,6 +284,23 @@ public class cl4cds {
     }
   }
 
+  private static String compact(String ids, long objectID) {
+    String compact = "";
+    Scanner scan = new Scanner(ids);
+    while (scan.hasNext()) {
+      long id = Long.parseLong(scan.next().substring(2), 16);
+      int compactID = (id == 0) ? 0 : (int)(id - objectID);
+      if (compactID < 0) {
+        System.err.println("Negative klass ID (" + ids + ", " + compactID + "). Try: -Dio.simonis.cl4cds.compactIDs=false");
+      }
+      compact += ("".equals(compact) ? "" : " ") + compactID;
+    }
+    if (DBG) {
+      System.err.println("Compacting " + ids + " to " + compact);
+    }
+    return compact;
+  }
+
   private static void error(String msg) {
     System.err.println(msg);
     help(-1);
@@ -277,6 +316,10 @@ public class cl4cds {
     System.out.println("                      if not specified written to <stdout>");
     System.out.println();
     System.out.println("  The following properties can be used to configure cl4cds:");
+    System.out.println("    -Dio.simonis.cl4cds.compactIDs=true :");
+    System.out.println("       Substract the address of java.lang.Object's 'klass' from all 'klass',");
+    System.out.println("       'super' and 'interface' IDs. This should lead to smaller IDs which ");
+    System.out.println("       don't overflow if stored in a 32-bit integer (defaults to 'true')");
     System.out.println("    -Dio.simonis.cl4cds.debug=true :");
     System.out.println("       Print additional tracig to <stderr> (defaults to 'false')");
     System.out.println("    -Dio.simonis.cl4cds.dumpFromClassFile=true :");
