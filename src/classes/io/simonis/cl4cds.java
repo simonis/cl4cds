@@ -28,7 +28,9 @@ package io.simonis;
 
 import java.io.BufferedReader;
 import java.io.DataInputStream;
+import java.io.File;
 import java.io.FileInputStream;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
@@ -49,12 +51,15 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.zip.ZipEntry;
 
+import javax.naming.directory.DirContext;
+
 /**
  * @author simonis
  *
  */
 public class cl4cds {
 
+  private static final String  FatJarTmp = System.getProperty("io.simonis.cl4cds.fatJarTmp", "./tmp");
   private static final boolean DBG = Boolean.getBoolean("io.simonis.cl4cds.debug");
   private static final boolean DumpFromClassFiles = Boolean.getBoolean("io.simonis.cl4cds.dumpFromClassFile");
   private static final boolean CompactIDs = Boolean.parseBoolean(System.getProperty("io.simonis.cl4cds.compactIDs", "true"));
@@ -160,7 +165,12 @@ public class cl4cds {
               }
             }
 
+            if (DBG) {
+              System.err.println("loader = " + loader);
+            }
+
             if ("NULL class loader".equals(loader) ||
+                loader.contains("of <bootloader>") || // this is JDK 11 syntax
                 loader.contains("jdk/internal/loader/ClassLoaders$PlatformClassLoader" /* && source == jrt image */) ||
                 loader.contains("jdk/internal/loader/ClassLoaders$AppClassLoader" /* && source == jar file */)) {
               out.println(name.replace('.', '/') + " id: " + klass);
@@ -185,6 +195,11 @@ public class cl4cds {
                 continue;
               }
               Status ret;
+
+              if (sourceFile.endsWith(".jar") && sourceFile.contains(".jar!")) {
+                // This is a fat jar file, so let's extract it
+                sourceFile = extractFatJar(sourceFile);
+              }
               if ((ret = checkClass(name.replace('.', '/'), sourceFile)) != Status.OK) {
                 switch (ret) {
                 case PRE_15 : 
@@ -231,6 +246,66 @@ public class cl4cds {
       System.err.println("Error reading input file:\n" + ioe);
     }
 
+  }
+
+  static HashMap<String, String> fatJarCache = new HashMap<>();
+
+  private static void mkdir(File dir) {
+    if (dir.isFile()) {
+      System.err.println("Error: " + dir + " is not a directory!");
+    }
+    if (!dir.exists()) {
+      try {
+        Files.createDirectories(dir.toPath());
+      } catch (IOException ioe) {
+        System.err.println("Can't create temporary directory " + dir + "(" + ioe + ")");
+      }
+      if (DBG) {
+        System.err.println("Created " + dir + " to extract nested JARs");
+      }
+    }
+  }
+
+  private static String extractFatJar(String source) {
+    String cache = fatJarCache.get(source);
+    if (cache != null) {
+      return cache;
+    }
+
+    int index = source.indexOf('!');
+    String mainJar = source.substring(0, index);
+    String childJar = source.substring(index+2);
+    String tmpFile = FatJarTmp + "/" + childJar;
+
+    if (Files.isRegularFile(Paths.get(mainJar))) {
+      try (JarFile jar = new JarFile(mainJar)) {
+        ZipEntry ze = jar.getEntry(childJar);
+        if (ze != null) {
+          try (InputStream in = jar.getInputStream(ze)) {
+            File dir = (new File(tmpFile)).getParentFile();
+            mkdir(dir);
+            try (FileOutputStream out = new FileOutputStream(tmpFile)) {
+              byte buff[] = new byte[4096];
+              int n;
+              while ((n = in.read(buff)) > 0) {
+                out.write(buff, 0, n);
+              }
+            }
+            if (DBG) {
+              System.out.println("Extracted " + childJar + " from " + mainJar + " into " + dir);
+            }
+          }
+          fatJarCache.put(source, tmpFile);
+          return tmpFile;
+        }
+      } catch (IOException e) {
+        if (DBG) {
+          System.err.println("Can't extract " + childJar + " from " + mainJar + "(" + e + ")");
+          return source;
+        }
+      }
+    }
+    return source;
   }
 
   private static Status checkClass(String name, String source) {
@@ -326,6 +401,10 @@ public class cl4cds {
     System.out.println("       Include classes into the output which are loaded from plain classfiles.");
     System.out.println("       This is currently not supported by OpenJDK 10 which can only dump");
     System.out.println("       classes from .jar files but may change eventually (defaults to 'false')");
+    System.out.println("    -Dio.simonis.cl4cds.fatJarTmp=<directory> :");
+    System.out.println("       If application classes are loaded from a \"fat\" JAR file (i.e. a JAR");
+    System.out.println("       which contains other, nested JAR files), these nested JAR files will be");
+    System.out.println("       extracted to <directory> (defaults to './tmp')");
     System.out.println();
     System.exit(status);
   }
